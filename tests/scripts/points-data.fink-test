@@ -1,0 +1,97 @@
+# Points, pivots and data channels through the editor.
+new 16 16
+hover canvas
+assert channels == normal, emissive
+tool Pencil
+layer Line
+color 1
+stroke 2,2 12,2 12,12 2,12 2,2
+key Alt+H
+key Alt+N
+stroke 3,3 13,3 13,13 3,13 3,3
+
+# the Point tool: P. With no point chosen it places the pivot
+key P
+assert tool == Point
+frame 1
+stroke 7,12
+assert point pivot == 7,12
+frame 2
+assert point pivot == 7,12
+frame 3
+assert point pivot == 7,12 inherited
+stroke 8,13
+assert point pivot == 8,13
+# right-click clears it on this drawing
+stroke 8,13 right
+assert point pivot == 7,12 inherited
+cmd edit.undo
+assert point pivot == 8,13
+
+point new hand
+frame 1
+stroke 12,6
+assert point hand == 12,6
+assert points == pivot, hand
+cmd edit.undo
+assert point hand == -
+
+# data: C cycles colors, normal, emissive
+key C
+assert channel == normal
+key C
+assert channel == emissive
+tool Pencil
+channel value 200
+stroke 2,2 5,2
+assert data emissive Line 4,2 == 200
+assert pixel Line 4,2 == 1
+# fill fills the shape: the whole outline
+tool Fill
+channel value 90
+stroke 12,7
+assert data emissive Line 12,3 == 90
+key C
+assert channel == color
+
+# a map that reads them
+map light emissive normal.x - 255
+assert atlas ~= cells
+
+# the pen's eraser end: erases whatever tool is chosen, then the tool comes back
+channel color
+tool Pencil
+layer Line
+color 1
+frame 1
+stroke 5,5
+assert pixel Line 5,5 == 1
+pen eraser
+assert effectivetool == Eraser
+stroke 5,5
+assert pixel Line 5,5 == 0
+pen tip
+assert effectivetool == Pencil
+
+# keyed points: keys on frames, moving between them even through a held drawing
+key P
+point new aim keyed
+assert points == pivot, hand, aim
+frame 1
+stroke 2,2
+frame 3
+stroke 10,2
+frame 2
+assert point aim == 2,2 inherited
+point smooth aim on
+assert point aim == 6,2 inherited
+# drag the second key to frame 2
+point move aim 3 2
+frame 2
+assert point aim == 10,2
+cmd edit.undo
+assert point aim == 6,2 inherited
+# right-click deletes the key on this frame
+frame 3
+stroke 10,2 right
+assert point aim == 2,2 inherited

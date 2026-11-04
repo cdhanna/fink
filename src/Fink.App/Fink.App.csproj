@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        The Fink editor: MonoGame DesktopGL + ImGui (the engine's ImGuiRenderer, docking on).
+        fade.mono comes BY SOURCE from ../fade.mono; see Directory.Build.props.
+
+        Automation: Fink.exe with a script option runs a .fink-test script in the real window,
+        saves its screenshots, prints a report and exits with 0 (pass) or 1 (fail). The options
+        are listed in Program.cs; the script language is in Fink.Editor's ScriptRunner.
+    -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <RootNamespace>Fink.App</RootNamespace>
+        <AssemblyName>Fink</AssemblyName>
+        <RollForward>Major</RollForward>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <TieredCompilation>false</TieredCompilation>
+        <!-- the big F: the exe's icon; Assets/Icon.bmp below is the window's -->
+        <ApplicationIcon>Assets\Icon.ico</ApplicationIcon>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- MonoGame's SDL window looks for an embedded resource named exactly this. -->
+        <EmbeddedResource Include="Assets\Icon.bmp" LogicalName="Icon.bmp" />
+    </ItemGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <OutputType>WinExe</OutputType>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Fink.Core\Fink.Core.csproj" />
+        <ProjectReference Include="..\Fink.Editor\Fink.Editor.csproj" />
+        <ProjectReference Include="$(FadeMonoDir)\Fade.MonoGame.Game\Fade.MonoGame.Game.csproj" />
+        <ProjectReference Include="$(FadeMonoDir)\Fade.MonoGame.Contracts\Fade.MonoGame.Contracts.csproj" />
+    </ItemGroup>
+
+    <!-- Sample shaders, listed in the Shader panel under "Fink samples". -->
+    <ItemGroup>
+        <None Include="..\..\samples\shaders\**" LinkBase="shaders" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- The engine compiles against MonoGame for reference only; the app owns the backend. -->
+    <ItemGroup>
+        <PackageReference Include="MonoGame.Framework.DesktopGL" Version="$(MonogameVersion)" />
+        <PackageReference Include="ImGui.NET" Version="$(ImGuiVersion)" />
+        <!-- The shader preview compiles game .fx files in-process, the same way the game's content build does. -->
+        <PackageReference Include="MonoGame.Framework.Content.Pipeline" Version="$(MonogameVersion)" />
+    </ItemGroup>
+</Project>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- The editor's state and behavior: commands, hotkeys, tools on the canvas, settings, and the
+         automation script runner. No window and no rendering, so all of it runs headless in tests.
+         ImGui.NET is referenced only for its ImGuiKey enum, the key names bindings use. -->
+    <PropertyGroup>
+        <RootNamespace>Fink.Editor</RootNamespace>
+    </PropertyGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\Fink.Core\Fink.Core.csproj" />
+        <PackageReference Include="ImGui.NET" Version="$(ImGuiVersion)" />
+    </ItemGroup>
+</Project>

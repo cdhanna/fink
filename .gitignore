@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+imgui.ini
+tests/scripts/out/
+
+# FadeBasic.Build writes the compiled program here
+Launch/

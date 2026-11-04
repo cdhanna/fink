@@ -1,0 +1,54 @@
+# A walk through the UI with screenshots, for checking layout by eye. Headless, the shots are skipped.
+new 64 64
+hover canvas
+layer Line
+color 1
+
+# a little blob creature with a gap in its outline
+stroke 20,14 30,10 40,12 48,20 50,32 46,44 36,50 24,48 16,40 14,28 18,18 20,14
+stroke 28,26 28,30
+stroke 38,26 38,30
+stroke 30,38 34,40 37,38
+layer Fill
+set gap 1
+tool Fill
+color 9
+stroke 32,20
+assert pixel Fill 32,20 == 9
+assert pixel Fill 2,2 == 0
+
+# a second frame for the onion skin
+key Alt+D
+tool Pencil
+layer Line
+color 1
+stroke 52,10 56,14
+assert frames == 2
+
+shot 01-draw-workspace
+shot 02-canvas canvas
+
+key Ctrl+2
+wait 2
+shot 03-animate-workspace
+
+key Ctrl+3
+wait 2
+shot 04-minimal-workspace
+
+key Ctrl+1
+wait 2
+key Tab
+wait 1
+shot 05-focus-mode
+key Tab
+
+key Ctrl+Comma
+wait 2
+shot 06-options-hotkeys
+key Ctrl+Comma
+
+key F1
+wait 2
+shot 07-command-palette
+assert palette == True

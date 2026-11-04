@@ -1,0 +1,52 @@
+# Hotkeys drive commands, hold commands release, scopes pick the right command.
+new 32 32
+hover canvas
+
+key G
+assert tool == Fill
+key B
+assert tool == Pencil
+
+# Alt held over the canvas: eyedropper until released
+keydown Alt
+assert effectivetool == Eyedropper
+keyup Alt
+assert effectivetool == Pencil
+
+# Space held: pan, and dragging moves the view
+keydown Space
+drag 40,10
+keyup Space
+assert pan == 40,10
+assert effectivetool == Pencil
+
+# ',' and '.' step frames anywhere; Right arrow only in the timeline
+key Alt+N
+assert frames == 2
+assert frame == 2
+key Comma
+assert frame == 1
+key RightArrow
+assert frame == 1
+hover timeline
+key RightArrow
+assert frame == 2
+
+# undo/redo through keys
+key Ctrl+Z
+assert frames == 1
+key Ctrl+Shift+Z
+assert frames == 2
+key Ctrl+Y
+assert frames == 2
+
+# rebinding: undo moves to U; Ctrl+Z no longer does anything
+unbind edit.undo Ctrl+Z
+bind edit.undo U
+assert binding.edit.undo == U
+key Ctrl+Z
+assert frames == 2
+key U
+assert frames == 1
+resetkeys
+assert binding.edit.undo == Ctrl+Z

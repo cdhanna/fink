@@ -1,0 +1,193 @@
+# Selections: make, move, undo, copy/paste in place, rotate/flip, scale by handle, clip painting,
+# add/subtract/intersect, and moving line + fill together.
+new 32 32
+hover canvas
+layer Line
+color 1
+
+# a 4x2 block of line art at (2..5, 2..3)
+stroke 2,2 5,2
+stroke 2,3 5,3
+assert pixel Line 5,3 == 1
+
+# rectangle select it
+tool Select
+stroke 2,2 5,3
+assert selection == 8
+assert selectionbounds == 2,2,4,2
+
+# drag inside: picks it up and moves it by (+10,+10)
+stroke 3,2 13,12
+assert floating == True
+assert pixel Line 2,2 == 0
+key Enter
+assert floating == False
+assert pixel Line 12,12 == 1
+assert pixel Line 15,13 == 1
+assert selectionbounds == 12,12,4,2
+assert history == 3
+
+# the move is one undo step
+key Ctrl+Z
+assert pixel Line 2,2 == 1
+assert pixel Line 12,12 == 0
+key Ctrl+Y
+assert pixel Line 12,12 == 1
+
+# copy, new frame, paste in place
+key Ctrl+C
+assert clipboard == 4x2 x1
+key Alt+N
+assert frame == 2
+assert pixel Line 12,12 == 0
+key Ctrl+V
+assert floating == True
+key Enter
+assert pixel Line 12,12 == 1
+assert pixel Line 15,13 == 1
+
+# a quarter turn about the center (14,13): 4x2 becomes 2x4
+key R
+assert selectionbounds == 13,11,2,4
+key Enter
+assert pixel Line 13,11 == 1
+assert pixel Line 14,14 == 1
+assert pixel Line 12,12 == 0
+
+# Escape puts a transform back
+key R
+assert floating == True
+key Escape
+assert floating == False
+assert pixel Line 13,11 == 1
+assert selectionbounds == 13,11,2,4
+
+# two flips are a no-op, pixel for pixel
+key Shift+H
+key Shift+H
+key Enter
+assert selectionbounds == 13,11,2,4
+assert pixel Line 14,14 == 1
+
+# scale 2x by dragging the bottom-right handle from (15,15) to (17,19)
+set zoom 8
+tool Transform
+stroke 15.0,15.0 17.0,19.0
+assert floating == True
+assert selectionbounds == 13,11,4,8
+key Enter
+assert pixel Line 16,18 == 1
+
+# painting stays inside a selection
+key Ctrl+D
+tool Select
+stroke 0,0 3,3
+tool Pencil
+color 2
+stroke 0,1 8,1
+assert pixel Line 2,1 == 2
+assert pixel Line 6,1 == 0
+
+# add / subtract / intersect
+tool Select
+key Ctrl+D
+stroke 0,20 9,29
+assert selection == 100
+stroke 0,20 4,29 alt
+assert selection == 50
+stroke 0,20 9,20 shift alt
+assert selection == 5
+stroke 0,30 1,30 shift
+assert selection == 7
+
+# Alt is subtract here, so the eyedropper hold must stay out of the way
+keydown Alt
+assert effectivetool == Select
+keyup Alt
+
+# all layers: line art and its fill move together
+new 16 16
+tool Pencil
+layer Line
+color 1
+stroke 2,2 4,2
+layer Fill
+tool Fill
+color 5
+stroke 10,10
+assert pixel Fill 3,1 == 5
+cmd selection.allLayers
+tool Select
+stroke 2,1 4,3
+stroke 3,2 3,6
+key Enter
+assert pixel Line 3,6 == 1
+assert pixel Line 3,2 == 0
+assert pixel Fill 3,1 == 0
+assert pixel Fill 3,5 == 5
+
+# ---- line and its fill move together (the fill follows the line's timing)
+cmd selection.allLayers
+assert checked.selection.allLayers == False
+new 32 32
+hover canvas
+assert checked.selection.withLinked == True
+tool Pencil
+layer Line
+color 1
+stroke 4,4 10,4 10,10 4,10 4,4
+layer Fill
+tool Fill
+color 9
+stroke 7,7
+layer Line
+tool Select
+stroke 2,2 12,12
+stroke 7,4 17,4
+assert floating == True
+key Enter
+assert pixel Line 14,4 == 1
+assert pixel Fill 17,7 == 9
+assert pixel Fill 7,7 == 0
+# from the fill layer it works the other way round too
+key Ctrl+D
+layer Fill
+stroke 12,2 22,12
+stroke 17,7 17,17
+key Enter
+assert pixel Line 14,14 == 1
+assert pixel Fill 17,17 == 9
+# a single undo puts both back
+cmd edit.undo
+assert pixel Line 14,4 == 1
+assert pixel Fill 17,7 == 9
+
+# copy the pair, paste onto a second character's line + fill (different names): matched by role
+key Ctrl+D
+layer Line
+stroke 12,2 22,12
+cmd edit.copy
+assert clipboard == 11x11 x2
+cmd layer.addLine
+cmd layer.addFill
+# the new fill is selected, and follows the new line layer
+assert layer == Fill 1
+cmd edit.paste
+assert floating == True
+key Enter
+assert track "Line 1" == 1
+assert track "Fill 1" == 1
+assert pixel "Line 1" 14,4 == 1
+assert pixel "Fill 1" 17,7 == 9
+
+# turned off, a selection on the line leaves the fill
+cmd selection.withLinked
+key Ctrl+D
+layer Line
+tool Select
+stroke 12,2 22,12
+stroke 17,4 17,24
+key Enter
+assert pixel Line 14,24 == 1
+assert pixel Fill 17,7 == 9
+cmd selection.withLinked

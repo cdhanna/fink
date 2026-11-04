@@ -1,0 +1,53 @@
+# Every sample shader compiles and draws. Headless, the shader parts do nothing.
+new 32 32
+wait 6
+cmd workspace.animate
+wait 6
+hover canvas
+tool Pencil
+layer Line
+color 1
+stroke 12,6 16,4 20,6 22,10 20,14 16,16 12,14 10,10 12,6
+stroke 15,9 15,10
+layer Fill
+tool Fill
+color 9
+stroke 17,10
+assert pixel Fill 17,10 == 9
+set zoom 8
+
+shader sample:outline
+waitshader
+assert shaderstatus == ok
+shot 40-outline canvas
+shot 40-outline-full
+
+shader sample:hit-flash
+waitshader
+assert shaderstatus == ok
+shot 41-hit-flash-full
+
+shader sample:dissolve
+waitshader
+assert shaderstatus == ok
+shot 42-dissolve-full
+
+shader sample:wave
+waitshader
+assert shaderstatus == ok
+shot 43-wave-full
+
+shader sample:drop-shadow
+waitshader
+assert shaderstatus == ok
+shot 44-drop-shadow-full
+
+shader sample:rim-light
+waitshader
+assert shaderstatus == ok
+shot 45-rim-light-full
+
+shader sample:hue-shift
+waitshader
+assert shaderstatus == ok
+shot 46-hue-shift-full

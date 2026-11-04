@@ -1,0 +1,63 @@
+# Projects: several assets sharing a palette, saved and opened as one .fink file.
+new 32 32
+hover canvas
+assert assets == sprite
+assert dirty == False
+assert ramps ~= Ink:1+6
+
+tool Pencil
+layer Line
+color 1
+stroke 2,2 6,2
+assert dirty == True
+
+asset new slime 16 16
+assert asset == slime
+assert size.document == 16x16
+assert assets == sprite, slime
+tool Pencil
+layer Line
+color 9
+stroke 1,1 4,1
+
+# Ctrl+PageUp / Ctrl+PageDown step through them
+key Ctrl+PageUp
+assert asset == sprite
+assert pixel Line 4,2 == 1
+key Ctrl+PageDown
+assert asset == slime
+
+asset rename slime blob
+assert assets == sprite, blob
+asset duplicate
+assert assets == sprite, blob, blob copy
+asset delete "blob copy"
+assert assets == sprite, blob
+
+save out/project-test/game.fink
+assert dirty == False
+assert file == game.fink
+
+# a new project, then open the saved one again
+new 8 8
+assert assets == sprite
+open out/project-test/game.fink
+assert assets == sprite, blob
+assert dirty == False
+asset blob
+assert pixel Line 3,1 == 9
+asset sprite
+assert pixel Line 6,2 == 1
+
+# atlases and palette variants
+assert atlas ~= 2 clips
+assert atlas ~= cells
+variant new night
+assert variants == night
+assert variant == 1
+variant set 1 1 102030
+variant 0
+assert variant == 0
+atlas new ui
+atlas include blob
+assert atlas ~= ui

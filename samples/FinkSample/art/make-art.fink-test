@@ -1,0 +1,192 @@
+# Draws the sample game's art, saves it as sample.fink and exports the atlas into the game.
+# Run from the repo root:   Fink.exe --script samples/FinkSample/art/make-art.fink-test
+# (or just open samples/FinkSample/art/sample.fink in Fink, change things, and Ctrl+E).
+new 32 32
+hover canvas
+asset rename sprite slime
+
+# ---- slime: four drawings, a line layer with its fill following
+# 1: resting
+tool Pencil
+layer Line
+color 1
+stroke 6,27 6,21 9,16 13,13 19,13 23,16 26,21 26,27 6,27
+stroke 12,20 12,21
+stroke 20,20 20,21
+layer Fill
+tool Fill
+color 18
+stroke 16,22
+# 2: squashed
+layer Line
+key Alt+N
+tool Pencil
+color 1
+stroke 4,27 4,23 8,18 13,16 19,16 24,18 28,23 28,27 4,27
+stroke 12,22 12,23
+stroke 20,22 20,23
+layer Fill
+tool Fill
+color 18
+stroke 16,24
+# 3: stretching up
+layer Line
+key Alt+N
+tool Pencil
+color 1
+stroke 8,23 8,16 11,10 14,8 18,8 21,10 24,16 24,23 8,23
+stroke 13,14 13,15
+stroke 19,14 19,15
+layer Fill
+tool Fill
+color 18
+stroke 16,18
+# 4: in the air
+layer Line
+key Alt+N
+tool Pencil
+color 1
+stroke 9,19 9,12 12,6 15,4 17,4 20,6 23,12 23,19 9,19
+stroke 13,10 13,11
+stroke 19,10 19,11
+layer Fill
+tool Fill
+color 18
+stroke 16,14
+
+# timing: idle (1 held, 2 held) then a hop
+layer Line
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+assert frames == 17
+expose Line 1 1 4
+expose Line 5 2 4
+expose Line 9 2 2
+expose Line 11 3 2
+expose Line 13 4 3
+expose Line 16 3 1
+expose Line 17 2 1
+assert track Line == 1 1 1 1 2 2 2 2 2 2 3 3 4 4 4 3 2
+tag idle 1 8
+tag hop 9 17 once
+
+# the slime's pivot (feet, on the ground) and a point on top of its head, per drawing
+tool Point
+frame 1
+point set pivot 16,27
+point new top
+point set top 16,12
+frame 5
+point set top 16,15
+frame 11
+point set top 16,7
+frame 13
+point set top 16,3
+assert point top == 16,3
+frame 2
+assert point top == 16,12
+assert point pivot == 16,27
+
+# data: glowing eyes, and a body that faces up (for lighting from above)
+layer Line
+tool Pencil
+channel emissive
+channel value 255
+frame 1
+stroke 12,20 12,21
+stroke 20,20 20,21
+frame 5
+stroke 12,22 12,23
+stroke 20,22 20,23
+frame 11
+stroke 13,14 13,15
+stroke 19,14 19,15
+frame 13
+stroke 13,10 13,11
+stroke 19,10 19,11
+assert data emissive Line 19,10 == 255
+layer Fill
+tool Fill
+channel normal
+channel normal 8
+frame 1
+stroke 16,22
+frame 5
+stroke 16,24
+frame 11
+stroke 16,18
+frame 13
+stroke 16,14
+assert data normal Fill 16,14 == 8
+channel color
+
+# ---- coin: a spin, on twos
+asset new coin 16 16
+tool Pencil
+layer Line
+color 7
+stroke 5,1 10,1 13,4 13,11 10,14 5,14 2,11 2,4 5,1
+stroke 7,5 7,10
+layer Fill
+tool Fill
+color 10
+stroke 9,8
+layer Line
+key Alt+N
+tool Pencil
+color 7
+stroke 6,1 9,1 11,4 11,11 9,14 6,14 4,11 4,4 6,1
+layer Fill
+tool Fill
+color 10
+stroke 7,8
+layer Line
+key Alt+N
+tool Pencil
+color 7
+stroke 7,1 8,1 8,14 7,14 7,1
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+expose Line 1 1 2
+expose Line 3 2 2
+expose Line 5 3 2
+expose Line 7 2 2
+assert track Line == 1 1 2 2 3 3 2 2
+tag spin 1 8
+
+# ---- a red variant for the slime (green ramp 16-19 turned red)
+variant new red
+variant set 1 16 4a1020
+variant set 1 17 8a2030
+variant set 1 18 d84848
+variant set 1 19 f09090
+variant 0
+
+# ---- save, and export into the game
+atlas name sprites
+atlas folder samples/FinkSample/Assets/Textures
+atlas code samples/FinkSample
+atlas loadas Textures/sprites
+atlas padding 1
+map light emissive normal.x normal.y 255
+atlas repack
+assert atlas ~= 7 cells
+asset slime
+assert points == pivot, top
+save samples/FinkSample/art/sample.fink
+atlas export
+assert export ~= fink_sprites.fbasic

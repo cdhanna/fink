@@ -1,0 +1,31 @@
+# Panel, focus, workspace and dialog commands.
+new 64 64
+
+key Tab
+assert focus == True
+assert panel.Tools == False
+assert panel.Timeline == False
+key Tab
+assert focus == False
+assert panel.Tools == True
+
+cmd panel.history
+assert panel.History == False
+cmd panel.history
+assert panel.History == True
+
+key Ctrl+2
+assert pendingworkspace == Animate
+
+key F1
+assert palette == True
+key Ctrl+Comma
+assert options == True
+
+key O
+assert onion == False
+assert checked.onion.toggle == False
+key Enter
+assert playing == True
+key Enter
+assert playing == False

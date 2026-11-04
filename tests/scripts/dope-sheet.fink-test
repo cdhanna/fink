@@ -1,0 +1,165 @@
+# Dope sheet: drawings held over frames, reused, retimed; fill following its line layer.
+new 32 32
+hover canvas
+assert fps == 12
+set fps 24
+assert fps == 24
+set fps 12
+
+# drawing on the empty first cell makes drawing 1
+tool Pencil
+layer Line
+color 1
+assert drawing == -
+stroke 4,4 10,4 10,10 4,10 4,4
+assert drawing == 1
+assert track Line == 1
+
+# fill follows the line layer's timing
+layer Fill
+tool Fill
+color 9
+stroke 7,7
+assert drawing == 1
+assert track Fill == 1
+
+# Alt+H: a held frame. Both layers hold, nothing new drawn
+key Alt+H
+assert frames == 2
+assert frame == 2
+assert track Line == 1 1
+assert track Fill == 1 1
+
+# Alt+N on the line layer: a new blank drawing there; its fill isn't drawn yet
+layer Line
+key Alt+N
+assert track Line == 1 1 2
+assert track Fill == 1 1 -
+assert pixel Line 4,4 == 0
+
+# can't fill where the line layer's drawing has no fill... until drawing it
+tool Pencil
+stroke 6,6 12,6 12,12 6,12 6,6
+layer Fill
+tool Fill
+stroke 9,9
+assert track Fill == 1 1 2
+
+# Alt+D duplicates the line drawing and its fill
+layer Line
+key Alt+D
+assert track Line == 1 1 2 3
+assert track Fill == 1 1 2 3
+assert pixel Fill 9,9 == 9
+
+# hold longer / shorter with > and <
+key Shift+Period
+assert track Line == 1 1 2 3 3
+assert frames == 5
+frame 3
+key Shift+Period
+key Shift+Period
+assert track Line == 1 1 2 2 2 3 3
+key Shift+Comma
+assert track Line == 1 1 2 2 3 3 -
+assert track Fill == 1 1 2 2 3 3 -
+
+# reuse drawing 1 on the empty last cell: a cycle; its fill comes along
+expose Line 7 1
+assert track Line == 1 1 2 2 3 3 1
+assert track Fill == 1 1 2 2 3 3 1
+
+# editing a reused drawing changes every frame that shows it
+frame 7
+tool Pencil
+layer Line
+color 1
+stroke 20,20
+frame 1
+assert pixel Line 20,20 == 1
+
+# dragging a hold's edge (overwrite)
+holdend Line 3 6
+assert track Line == 1 1 2 2 2 2 1
+holdend Line 3 3
+assert track Line == 1 1 2 - - - 1
+
+# N: new drawing on the rest of the hold
+frame 1
+key N
+assert track Line == 4 4 2 - - - 1
+
+# undo walks it all back
+cmd edit.undo
+assert track Line == 1 1 2 - - - 1
+
+# Delete over the timeline deletes the frame
+hover timeline
+frame 2
+key Delete
+assert frames == 6
+assert track Line == 1 2 - - - 1
+
+# playback at a fixed rate: 12 fps is 83.3ms a frame
+hover canvas
+frame 1
+cmd playback.toggle
+advance 170
+assert frame == 3
+cmd playback.toggle
+
+# own timing for the fill: keeps what it shows
+follow Fill none
+assert track Fill == 1 2 - - - 1
+layer Line
+frame 2
+cmd drawing.new
+assert track Line == 1 4 - - - 1
+assert track Fill == 1 2 - - - 1
+# following again: fill shows its drawings by the line's numbers (it has no #4)
+follow Fill Line
+assert track Fill == 1 - - - - 1
+cmd edit.undo
+assert track Fill == 1 2 - - - 1
+
+# tags: playback loops the tag under the playhead, in its loop mode
+new 16 16
+tool Pencil
+layer Line
+color 1
+stroke 1,1
+key Alt+N
+stroke 2,2
+key Alt+N
+stroke 3,3
+key Alt+N
+stroke 4,4
+tag walk 2 4 pingpong
+assert tags == walk:2-4:PingPong
+frame 3
+cmd playback.toggle
+assert playingtag == walk
+advance 84
+assert frame == 4
+advance 84
+assert frame == 3
+advance 84
+assert frame == 2
+advance 84
+assert frame == 3
+cmd playback.toggle
+# with Play Tag Only off, it plays everything
+cmd playback.tag
+frame 4
+cmd playback.toggle
+advance 84
+assert frame == 1
+cmd playback.toggle
+cmd playback.tag
+# deleting a frame inside the tag shortens it; undo brings it back
+frame 3
+hover timeline
+key Delete
+assert tags == walk:2-3:PingPong
+cmd edit.undo
+assert tags == walk:2-4:PingPong

@@ -1,0 +1,26 @@
+<Project>
+    <!-- fade.mono is referenced BY SOURCE from the sibling ../fade.mono checkout (as soundrel does),
+         and its own Directory.Build.props governs its projects, so the pins below must stay in step
+         with ../fade.mono/Directory.Build.props. -->
+    <PropertyGroup>
+        <!-- Must match fade.mono's FadeVersion or the build fails with CS1704. -->
+        <FadeVersion Condition="'$(FadeVersion)' == ''">0.3.1.1</FadeVersion>
+        <MonogameVersion>3.8.6</MonogameVersion>
+        <ImGuiVersion>1.91.6.1</ImGuiVersion>
+
+        <FadeMonoDir Condition="'$(FadeMonoDir)' == ''">$(MSBuildThisFileDirectory)..\fade.mono</FadeMonoDir>
+    </PropertyGroup>
+
+    <!-- The editor runs on DesktopGL. Shader preview for a DesktopVK game (soundrel) will compile
+         that game's effects for GL; see DESIGN.md. -->
+    <PropertyGroup Condition="'$(FadeMonoGamePlatform)' == ''">
+        <FadeMonoGamePlatform>Desktop</FadeMonoGamePlatform>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+    </PropertyGroup>
+</Project>

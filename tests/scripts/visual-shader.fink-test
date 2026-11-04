@@ -1,0 +1,49 @@
+# Shader preview, tags and export in the real window. Headless, the shader parts do nothing.
+new 32 32
+wait 6
+cmd workspace.animate
+wait 6
+hover canvas
+
+# a filled ball on two frames
+tool Pencil
+layer Line
+color 1
+stroke 12,6 16,4 20,6 22,10 20,14 16,16 12,14 10,10 12,6
+layer Fill
+tool Fill
+color 9
+stroke 16,10
+layer Line
+key Alt+D
+tool Pencil
+stroke 16,17 16,20
+tag bounce 1 2 pingpong
+assert tags == bounce:1-2:PingPong
+
+# the shader panel is a tab next to Layers and History
+cmd panel.shader
+cmd panel.shader
+assert panel.Shader == True
+
+# a shader that doesn't compile shows its error
+shader tests/shaders/broken.fx
+waitshader
+assert shaderstatus ~= undefinedThing
+shot 30-shader-error
+
+# the test shader: a tint, an outline, a per-sprite flash
+shader tests/shaders/preview-test.fx
+waitshader
+assert shaderstatus == ok
+shaderparam Tint 1 0.4 0.4 1
+shaderparam OutlineAmount 1
+shaderparam OutlineColor 1 1 1 1
+spritedata 1 0.15,0,0,0
+wait 4
+shot 31-shader-preview
+
+# export into the run's output folder
+asset rename sprite ball
+export tests/scripts/out/visual-shader/export
+assert export ~= fink_atlas.fbasic

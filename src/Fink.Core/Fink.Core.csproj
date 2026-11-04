@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- The document model, tools, undo and export. No graphics dependency, so all of it is
+         testable headless. -->
+    <PropertyGroup>
+        <RootNamespace>Fink.Core</RootNamespace>
+    </PropertyGroup>
+</Project>

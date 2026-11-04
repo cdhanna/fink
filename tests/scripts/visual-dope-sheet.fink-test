@@ -1,0 +1,63 @@
+# The dope sheet, for checking by eye. Headless, the shots are skipped.
+new 48 48
+wait 6
+cmd workspace.animate
+wait 6
+hover canvas
+
+# a background line layer, held for the whole shot
+cmd layer.addLine
+layer "Line 1"
+cmd layer.moveDown
+cmd layer.moveDown
+tool Line
+color 3
+stroke 0,40 47,40
+
+# the ball: drawing 1, filled
+layer Line
+tool Pencil
+color 1
+stroke 20,8 24,6 28,8 30,12 28,16 24,18 20,16 18,12 20,8
+layer Fill
+tool Fill
+color 9
+stroke 24,12
+
+# a held frame, then new drawings
+layer Line
+key Alt+H
+key Alt+N
+tool Pencil
+color 1
+stroke 20,20 24,18 28,20 30,24 28,28 24,30 20,28 18,24 20,20
+layer Fill
+tool Fill
+color 9
+stroke 24,24
+layer Line
+key Alt+N
+tool Pencil
+color 1
+stroke 18,32 24,30 30,32 32,36 30,39 18,39 16,36 18,32
+# drawing 3 held, then 2 and 1 reused on the way back up (no fill drawn for 3)
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+key Alt+H
+expose Line 6 2 2
+expose Line 8 1 2
+assert track Line == 1 1 2 3 3 2 2 1 1
+assert track Fill == 1 1 2 - - 2 2 1 1
+assert track "Line 1" == 1 1 1 1 1 1 1 1 1
+
+tag fall 1 5
+tag rise 6 9 pingpong
+frame 5
+wait 4
+shot 20-dope-sheet
+frame 7
+assert onion == True
+wait 4
+shot 21-onion-by-drawing
