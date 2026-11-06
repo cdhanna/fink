@@ -7,9 +7,9 @@ namespace Fink.App;
 
 public sealed partial class FinkGame
 {
-    private static readonly Num.Vector4 RoleLine = new(0.55f, 0.75f, 1f, 1f);
-    private static readonly Num.Vector4 RoleFill = new(1f, 0.75f, 0.45f, 1f);
-    private static readonly Num.Vector4 RoleRef = new(0.6f, 0.6f, 0.6f, 1f);
+    private Num.Vector4 RoleLine => Vec(Colors.Line);
+    private Num.Vector4 RoleFill => Vec(Colors.Fill);
+    private Num.Vector4 RoleRef => Vec(Colors.Reference);
     private int _fitFrames;
 
     private void DrawUi()
@@ -94,6 +94,7 @@ public sealed partial class FinkGame
             MenuCommand("asset.goto");
             MenuCommand("asset.duplicate");
             MenuCommand("asset.rename");
+            MenuCommand("asset.nineSlice");
             MenuCommand("asset.delete");
             ImGui.Separator();
             MenuCommand("asset.previous");
@@ -152,6 +153,7 @@ public sealed partial class FinkGame
             MenuCommand("layer.addLine");
             MenuCommand("layer.addFill");
             MenuCommand("layer.addReference");
+            MenuCommand("layer.rename");
             MenuCommand("layer.delete");
             ImGui.Separator();
             MenuCommand("layer.selectAbove");
@@ -229,7 +231,8 @@ public sealed partial class FinkGame
         var doc = Ed.Document;
         var view = Ed.View;
         var origin = ImGui.GetCursorScreenPos();
-        var avail = Num.Vector2.Max(ImGui.GetContentRegionAvail(), new Num.Vector2(32, 32));
+        float transportH = TransportHeight;
+        var avail = Num.Vector2.Max(ImGui.GetContentRegionAvail() - new Num.Vector2(0, transportH), new Num.Vector2(32, 32));
         var center = origin + avail / 2;
 
         // A fit keeps refitting for a few frames: right after a workspace is built the canvas
@@ -247,6 +250,7 @@ public sealed partial class FinkGame
         var imgMin = Floor(center - size / 2 + view.Pan);
         var imgMax = imgMin + size;
 
+        SliceInput(doc, imgMin, view.Zoom, origin, avail); // its tabs and preview take the mouse first
         ImGui.InvisibleButton("##canvas", avail,
             ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
         _canvasHovered = ImGui.IsItemHovered();
@@ -263,6 +267,8 @@ public sealed partial class FinkGame
 
         if (ImGui.IsItemActivated())
         {
+            // a pen touching down with its barrel button held arrives here as a right-click
+            // (PenAwareImGuiRenderer), so ImGui and the canvas always agree
             bool left = ImGui.IsMouseClicked(ImGuiMouseButton.Left), right = ImGui.IsMouseClicked(ImGuiMouseButton.Right);
             if (left || right) Ed.PointerDown(docPos, right ? PointerButton.Secondary : PointerButton.Primary, mods);
         }
@@ -273,19 +279,21 @@ public sealed partial class FinkGame
 
         var dl = ImGui.GetWindowDrawList();
         dl.PushClipRect(origin, origin + avail, true);
-        dl.AddRectFilled(origin, origin + avail, 0xFF1E1A1Cu);
+        dl.AddRectFilled(origin, origin + avail, Colors.Background);
         dl.AddRectFilled(imgMin + new Num.Vector2(4, 4), imgMax + new Num.Vector2(4, 4), 0x50000000u); // drop shadow
         dl.AddImage(_canvasTextureId, imgMin, imgMax);
 
         if (view.ShowGrid && view.Zoom >= 8) DrawPixelGrid(dl, imgMin, imgMax, view.Zoom);
         DrawSelectionOverlay(dl, imgMin, view.Zoom, docPos);
         DrawPointsOverlay(dl, imgMin, view.Zoom);
+        DrawSliceOverlay(dl, doc, imgMin, view.Zoom, origin, avail);
 
         // brush outline: red when the current tool can't edit the current layer
         bool allowed = Ed.Momentary != Momentary.None || Ed.CanEditCurrentLayer(Ed.Tool);
-        if (_canvasHovered && inside && Ed.Momentary == Momentary.None && Ed.Tool is not EyedropperTool and not ISelectionTool)
+        if (_canvasHovered && inside && (Ed.Momentary == Momentary.None || Ed.Momentary == Momentary.Eraser)
+            && (Ed.Erasing || Ed.Tool is not EyedropperTool and not ISelectionTool and not PointTool))
         {
-            int s = Ed.Tool is FillTool ? 1 : Ed.ToolSettings.Size;
+            int s = !Ed.Erasing && Ed.Tool is FillTool ? 1 : Ed.Brush.Size;
             int r0 = -(s - 1) / 2;
             var a = imgMin + new Num.Vector2(px + r0, py + r0) * view.Zoom;
             var b = a + new Num.Vector2(s, s) * view.Zoom;
@@ -302,10 +310,10 @@ public sealed partial class FinkGame
 
         // status line along the bottom
         float lh = ImGui.GetTextLineHeightWithSpacing();
-        dl.AddRectFilled(new Num.Vector2(origin.X, origin.Y + avail.Y - lh - 6), origin + avail, 0xC0141216u);
+        dl.AddRectFilled(new Num.Vector2(origin.X, origin.Y + avail.Y - lh - 6), origin + avail, (ImGui.GetColorU32(ImGuiCol.WindowBg) & 0x00FFFFFFu) | 0xC0000000u);
         var info = $"{Ed.EffectiveToolName}   {Ed.CurrentLayer.Name} ({Ed.CurrentLayer.Role})   frame {Ed.FrameIndex + 1}/{doc.Frames.Count}   {view.Zoom * 100}%   {doc.Width}x{doc.Height}";
         if (inside) info += $"   {px}, {py}";
-        dl.AddText(new Num.Vector2(origin.X + 10, origin.Y + avail.Y - lh - 3), 0xFFBBBBBBu, info);
+        dl.AddText(new Num.Vector2(origin.X + 10, origin.Y + avail.Y - lh - 3), ImGui.GetColorU32(ImGuiCol.Text), info);
 
         // messages along the top
         float y = origin.Y + 8;
@@ -314,9 +322,10 @@ public sealed partial class FinkGame
             dl.AddText(new Num.Vector2(origin.X + 10, y), 0xFF6A6AFFu, Ed.Tool.WhyNot(Ed.CurrentLayer.Role));
             y += lh;
         }
-        if (Ed.VisibleStatus is { } status) dl.AddText(new Num.Vector2(origin.X + 10, y), 0xFF60D0FFu, status);
+        if (Ed.VisibleStatus is { } status) dl.AddText(new Num.Vector2(origin.X + 10, y), Colors.Accent, status);
         dl.PopClipRect();
 
+        DrawTransport(origin + new Num.Vector2(0, avail.Y), avail.X, transportH);
         ImGui.End();
     }
 
@@ -369,13 +378,9 @@ public sealed partial class FinkGame
         DrawPointsSection();
         DrawPaintSection();
 
-        ImGui.SeparatorText("Brush");
         var ts = Ed.ToolSettings;
-        int size = ts.Size;
-        ImGui.SetNextItemWidth(-1);
-        if (ImGui.SliderInt("##size", ref size, 1, 32, "Size %d")) ts.Size = size;
-        Toggle("brush.pixelPerfect");
-        Toggle("brush.squareTip");
+        DrawBrush("Brush", ts, !Ed.Erasing, "Pencil and Line.");
+        DrawBrush("Eraser", Ed.EraserSettings, Ed.Erasing, "The Eraser tool, the pen's eraser end and Eraser (hold).");
 
         ImGui.SeparatorText("Fill");
         int gap = ts.GapClose;
@@ -391,6 +396,23 @@ public sealed partial class FinkGame
         Swatch("Secondary", Ed.Secondary, 28);
         ImGui.SameLine();
         CommandButton("color.swap", "Swap", small: true);
+    }
+
+    /// <summary>One brush's settings. The one in use is marked; [ and ] change its size.</summary>
+    private void DrawBrush(string name, ToolSettings b, bool inUse, string usedBy)
+    {
+        ImGui.PushID(name);
+        ImGui.SeparatorText(inUse ? $"{name}  (in use)" : name);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(usedBy + " [ and ] change the size of the brush in use.");
+        int size = b.Size;
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.SliderInt("##size", ref size, 1, 32, "Size %d")) b.Size = size;
+        bool pp = b.PixelPerfect, sq = b.SquareTip;
+        if (ImGui.Checkbox("Pixel Perfect", ref pp)) b.PixelPerfect = pp;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Remove L-shaped corner pixels from 1px strokes.");
+        ImGui.SameLine();
+        if (ImGui.Checkbox("Square", ref sq)) b.SquareTip = sq;
+        ImGui.PopID();
     }
 
     /// <summary>A checkbox bound to a toggle command, with the shortcut in its tooltip.</summary>
@@ -511,6 +533,53 @@ public sealed partial class FinkGame
 
     // ---------------------------------------------------------------- layers
 
+    /// <summary>A layer being dragged to a new place in the stack, and which list it started in.</summary>
+    private Layer? _layerDrag;
+    private string _layerDragList = "";
+
+    /// <summary>Call right after a layer's name item: dragging it starts moving the layer.</summary>
+    private void LayerDragSource(string list, Layer layer)
+    {
+        if (_layerDrag == null && ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 4 * Ui.UiScale))
+        {
+            _layerDrag = layer;
+            _layerDragList = list;
+            Ed.LayerIndex = Ed.Document.Layers.IndexOf(layer);
+        }
+    }
+
+    /// <summary>
+    /// Call after a list of layers has been drawn, with each row's layer and top/bottom on screen:
+    /// shows where a dragged layer would land, and moves it there on release.
+    /// </summary>
+    private void LayerDragTarget(string list, List<(Layer layer, float y0, float y1)> rows, float x0, float x1)
+    {
+        if (_layerDrag is not { } dragged || _layerDragList != list || rows.Count == 0) return;
+        var doc = Ed.Document;
+        if (!doc.Layers.Contains(dragged)) { _layerDrag = null; return; }
+        float my = ImGui.GetMousePos().Y;
+        var target = rows.FirstOrDefault(r => my < r.y1);
+        if (target.layer == null) target = rows[^1];
+        if (my < rows[0].y0) target = rows[0];
+        int from = doc.Layers.IndexOf(dragged), to = doc.Layers.IndexOf(target.layer);
+        var dl = ImGui.GetWindowDrawList();
+        var self = rows.First(r => r.layer == dragged);
+        dl.AddRectFilled(new Num.Vector2(x0, self.y0), new Num.Vector2(x1, self.y1), WithAlpha(Colors.Accent, 0x30));
+        if (to != from)
+        {
+            // the stack is drawn top first: moving up the stack lands above the target row
+            float y = to > from ? target.y0 : target.y1;
+            dl.AddLine(new Num.Vector2(x0, y), new Num.Vector2(x1, y), Colors.Accent, 2 * Ui.UiScale);
+        }
+        ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeNS);
+        ImGui.SetTooltip(to == from ? $"Move {dragged.Name}" : $"Move {dragged.Name} {(to > from ? "above" : "below")} {target.layer.Name}");
+        if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
+        {
+            _layerDrag = null;
+            if (to != from) Ed.MoveLayerTo(dragged, to);
+        }
+    }
+
     private void DrawLayersPanel()
     {
         CommandButton("layer.addLine", "+ Line");
@@ -526,9 +595,13 @@ public sealed partial class FinkGame
         ImGui.Separator();
 
         var doc = Ed.Document;
+        var rowRects = new List<(Layer, float, float)>();
+        float listX0 = ImGui.GetCursorScreenPos().X, listX1 = listX0 + ImGui.GetContentRegionAvail().X;
+        float spacing = ImGui.GetStyle().ItemSpacing.Y;
         for (int i = doc.Layers.Count - 1; i >= 0; i--) // top of the stack first
         {
             var layer = doc.Layers[i];
+            float rowTop = ImGui.GetCursorScreenPos().Y;
             ImGui.PushID(layer.Id.GetHashCode());
 
             bool visible = layer.Visible;
@@ -539,6 +612,8 @@ public sealed partial class FinkGame
             if (ImGui.Checkbox("##lock", ref locked)) layer.Locked = locked;
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Locked");
             ImGui.SameLine();
+            LayerOpacitySlider(layer, 56 * Ui.UiScale);
+            ImGui.SameLine();
 
             var roleCol = layer.Role switch { LayerRole.Line => RoleLine, LayerRole.Fill => RoleFill, _ => RoleRef };
             ImGui.TextColored(roleCol, layer.Role switch { LayerRole.Line => "LINE", LayerRole.Fill => "FILL", _ => "REF " });
@@ -547,14 +622,23 @@ public sealed partial class FinkGame
             bool usable = Ed.Tool.Allows(layer.Role);
             if (!usable) ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
             var label = doc.IsFollower(layer) ? $"{layer.Name}   (timing of {doc.TimingLayer(layer).Name})" : layer.Name;
-            if (ImGui.Selectable(label, i == Ed.LayerIndex)) Ed.LayerIndex = i;
+            if (!LayerRenameField(layer, ImGui.GetContentRegionAvail().X))
+            {
+                if (ImGui.Selectable(label, i == Ed.LayerIndex)) Ed.LayerIndex = i;
+                if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) StartLayerRename(layer);
+                LayerDragSource("panel", layer);
+                if (ImGui.IsItemHovered() && _layerDrag == null) ImGui.SetTooltip("Drag up or down to move the layer; double-click to rename it.");
+            }
             if (!usable) ImGui.PopStyleColor();
 
             ImGui.PopID();
+            rowRects.Add((layer, rowTop - spacing / 2, ImGui.GetCursorScreenPos().Y - spacing / 2));
         }
+        LayerDragTarget("panel", rowRects, listX0, listX1);
 
         ImGui.Spacing();
         ImGui.TextDisabled($"Greyed: {Ed.Tool.Name} can't edit it.");
+        DrawFillBoundsMatrix();
     }
 
     // ---------------------------------------------------------------- timeline (dope sheet)
@@ -563,10 +647,129 @@ public sealed partial class FinkGame
     /// <summary>A block being dragged: which hold (From..To on Layer), by what, and where it was grabbed.</summary>
     private sealed record BlockGrab(BlockGrabKind Kind, Layer Layer, int From, int To, int Offset, int PressFrame);
     private BlockGrab? _grab;
+    /// <summary>Where the dope sheet's cells were last drawn, for scripts that use the mouse.</summary>
+    private (Num.Vector2 P0, float CellW, float RowH, float TagH, float NumH)? _sheet;
+    /// <summary>A rectangle of cells picked in the dope sheet: frames From..To on some layers.</summary>
+    private sealed record CellSelection(List<Layer> Layers, int From, int To);
+    private CellSelection? _cellSel;
+    /// <summary>A selection rectangle being dragged out from this cell (Plus: it started on a "+").</summary>
+    private sealed record Marquee(int Frame, int Row, bool Plus);
+    private Marquee? _marquee;
+    /// <summary>The selection being dragged sideways, grabbed on this frame.</summary>
+    private int? _selDrag;
+    private bool _selMoved;
+    /// <summary>Dragging an onion bracket: -1 the before end, +1 the after end.</summary>
+    private int? _onionDrag;
+
+    /// <summary>Where the brackets go: the outside of the farthest ghost each way (or the playhead).</summary>
+    private (float before, float after) OnionBracketX(Document doc, Layer layer, List<OnionGhost> ghosts, float cellW)
+    {
+        int b = ghosts.Where(g => g.Kind == OnionKind.Before).Select(g => g.Frame).DefaultIfEmpty(Ed.FrameIndex).Min();
+        int a = ghosts.Where(g => g.Kind == OnionKind.After).Select(g => g.Frame).DefaultIfEmpty(Ed.FrameIndex).Max();
+        return (b * cellW + 1, (a + 1) * cellW - 1);
+    }
+
+    private static int? OnionBracketHit(float x, float before, float after, float sc) =>
+        Math.Abs(x - before) <= 6 * sc ? -1 : Math.Abs(x - after) <= 6 * sc ? +1 : null;
+
+    /// <summary>How many drawings, going one way from the playhead, reach as far as <paramref name="frame"/>.</summary>
+    private int OnionCountTo(Document doc, Layer layer, int dir, int frame)
+    {
+        int count = 0;
+        for (int k = 1; k <= OnionSettings.MaxCount; k++)
+        {
+            if (doc.NeighborDrawingFrame(layer, Ed.FrameIndex, dir, k) is not { } f) break;
+            if (dir < 0 ? f < frame : f > frame) break;
+            count = k;
+        }
+        return count;
+    }
+
+    private Layer? _renamingLayer;
+    private string _layerRenameText = "";
+    private bool _layerRenameFocus;
+
+    private void StartLayerRename(Layer layer)
+    {
+        _renamingLayer = layer;
+        _layerRenameText = layer.Name;
+        _layerRenameFocus = true;
+    }
+
+    /// <summary>
+    /// While <paramref name="layer"/> is being renamed: a text field in place of its name (Enter
+    /// or clicking away keeps it, Esc cancels). Returns false, drawing nothing, otherwise.
+    /// </summary>
+    private bool LayerRenameField(Layer layer, float width)
+    {
+        if (Ui.RenameLayer)
+        {
+            Ui.RenameLayer = false;
+            StartLayerRename(Ed.CurrentLayer);
+        }
+        if (_renamingLayer != layer) return false;
+        if (!Ed.Document.Layers.Contains(layer)) { _renamingLayer = null; return false; }
+        ImGui.SetNextItemWidth(width);
+        if (_layerRenameFocus)
+        {
+            ImGui.SetKeyboardFocusHere();
+            _layerRenameFocus = false;
+        }
+        bool enter = ImGui.InputText("##rename", ref _layerRenameText, 64, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll);
+        if (ImGui.IsKeyPressed(ImGuiKey.Escape)) _renamingLayer = null;
+        else if (enter || ImGui.IsItemDeactivated())
+        {
+            Ed.RenameLayer(layer, _layerRenameText);
+            _renamingLayer = null;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The layer's working opacity on the canvas (see <see cref="Layer.ViewOpacity"/>): never
+    /// exported. Right-click puts it back to 100%.
+    /// </summary>
+    private void LayerOpacitySlider(Layer layer, float width)
+    {
+        int pct = (int)MathF.Round(layer.ViewOpacity * 100);
+        ImGui.SetNextItemWidth(width);
+        bool dimmed = pct < 100;
+        if (dimmed) ImGui.PushStyleColor(ImGuiCol.Text, ImGui.ColorConvertU32ToFloat4(Colors.Accent));
+        if (ImGui.SliderInt("##viewop", ref pct, 0, 100, "%d%%")) layer.ViewOpacity = pct / 100f;
+        if (dimmed) ImGui.PopStyleColor();
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) layer.ViewOpacity = 1f;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("View opacity: how see-through this layer is on the canvas while you work.\n" +
+                             "Only for you: exports and atlases always show it fully. Right-click: back to 100%.");
+    }
+
+    /// <summary>The layer menu's onion part: on or off, and its own counts.</summary>
+    private void DrawLayerOnionMenu(Layer layer)
+    {
+        if (layer.Role == LayerRole.Reference) { ImGui.TextDisabled("Reference layers have no onion skin."); return; }
+        bool on = !layer.OnionOff;
+        if (ImGui.Checkbox("Onion skin", ref on)) layer.OnionOff = !on;
+        bool own = layer.OnionBefore != null || layer.OnionAfter != null;
+        if (ImGui.Checkbox("Own counts", ref own))
+        {
+            layer.OnionBefore = own ? Ed.Onion.Before : null;
+            layer.OnionAfter = own ? Ed.Onion.After : null;
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Off: this layer uses the counts in the timeline's toolbar.");
+        if (!own) return;
+        int b = layer.OnionBefore ?? Ed.Onion.Before, a = layer.OnionAfter ?? Ed.Onion.After;
+        ImGui.SetNextItemWidth(140 * Ui.UiScale);
+        if (ImGui.SliderInt("before", ref b, 0, OnionSettings.MaxCount)) layer.OnionBefore = b;
+        ImGui.SetNextItemWidth(140 * Ui.UiScale);
+        if (ImGui.SliderInt("after", ref a, 0, OnionSettings.MaxCount)) layer.OnionAfter = a;
+    }
     private (PointTrack track, int from)? _keyDrag;
-    private enum TagDragKind { Create, Start, End }
-    /// <summary>A tag being made or resized; Other is the frame of the end that stays put.</summary>
-    private sealed record TagDrag(TagDragKind Kind, Tag? Tag, int Other);
+    private enum TagDragKind { Create, Start, End, Move }
+    /// <summary>
+    /// A tag being made, stretched or slid. Other is the frame of the end that stays put (for a
+    /// slide, where it started); Press is the frame it was grabbed on.
+    /// </summary>
+    private sealed record TagDrag(TagDragKind Kind, Tag? Tag, int Other, int Press = -1);
     private TagDrag? _tagDrag;
     private Tag? _tagMenu;
     private string _tagMenuName = "";
@@ -678,15 +881,17 @@ public sealed partial class FinkGame
         var onion = Ed.Onion;
         ImGui.SetNextItemWidth(90 * Ui.UiScale);
         int before = onion.Before;
-        if (ImGui.SliderInt("##before", ref before, 0, 4, "before %d")) onion.Before = before;
+        if (ImGui.SliderInt("##before", ref before, 0, OnionSettings.MaxCount, "before %d")) onion.Before = before;
         ImGui.SameLine();
         ImGui.SetNextItemWidth(90 * Ui.UiScale);
         int after = onion.After;
-        if (ImGui.SliderInt("##after", ref after, 0, 4, "after %d")) onion.After = after;
+        if (ImGui.SliderInt("##after", ref after, 0, OnionSettings.MaxCount, "after %d")) onion.After = after;
         ImGui.SameLine();
         ImGui.SetNextItemWidth(110 * Ui.UiScale);
         float opacity = onion.Opacity;
         if (ImGui.SliderFloat("##opacity", ref opacity, 0.05f, 0.9f, "opacity %.2f")) onion.Opacity = opacity;
+        ImGui.SameLine();
+        Toggle("onion.pins");
         ImGui.SameLine();
         var d = Ed.CurrentDrawing;
         var num = Ed.Document.NumberAt(Ed.CurrentLayer, Ed.CurrentFrame);
@@ -712,6 +917,8 @@ public sealed partial class FinkGame
         int n = doc.Frames.Count, rows = doc.Layers.Count;
         var keyed = doc.Points.Where(t => t.Keyed).ToList();
         Layer LayerOfRow(int r) => doc.Layers[rows - 1 - r]; // top of the stack first
+        int RowOf(Layer l) => rows - 1 - doc.Layers.IndexOf(l);
+        if (_cellSel is { } stale && (stale.To >= n || stale.Layers.Any(l => !doc.Layers.Contains(l)))) _cellSel = null;
 
         // ---- layer names
         var namesTop = ImGui.GetCursorScreenPos();
@@ -724,19 +931,49 @@ public sealed partial class FinkGame
             ImGui.PushID(layer.Id.GetHashCode());
             ImGui.SetCursorScreenPos(namesTop + new Num.Vector2(0, headerH + r * rowH));
             var col = layer.Role switch { LayerRole.Line => RoleLine, LayerRole.Fill => RoleFill, _ => RoleRef };
+            // the onion toggle: filled = on, hollow = off, ringed = own counts
+            float ow = rowH - 4;
+            var op = ImGui.GetCursorScreenPos();
+            if (layer.Role != LayerRole.Reference)
+            {
+                if (ImGui.InvisibleButton("onion", new Num.Vector2(ow, rowH - 2))) layer.OnionOff = !layer.OnionOff;
+                var oc = op + new Num.Vector2(ow / 2, (rowH - 2) / 2);
+                var ocol = ImGui.GetColorU32(layer.OnionOff ? ImGuiCol.TextDisabled : ImGuiCol.Text);
+                if (layer.OnionOff) ImGui.GetWindowDrawList().AddCircle(oc, ow * 0.22f, ocol, 12, 1.5f);
+                else ImGui.GetWindowDrawList().AddCircleFilled(oc, ow * 0.22f, Ed.Onion.BeforeTint.Packed);
+                if (layer.OnionBefore != null || layer.OnionAfter != null) ImGui.GetWindowDrawList().AddCircle(oc, ow * 0.36f, ocol, 12, 1f);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(layer.OnionOff ? "Onion skin off for this layer. Click to turn it on."
+                        : $"Onion skin on: {Onion.BeforeFor(layer, Ed.Onion)} before, {Onion.AfterFor(layer, Ed.Onion)} after" +
+                          (layer.OnionBefore != null || layer.OnionAfter != null ? " (this layer's own)" : "") +
+                          ". Click to turn it off; right-click the name for this layer's own counts.");
+            }
+            else ImGui.Dummy(new Num.Vector2(ow, rowH - 2));
+            ImGui.SameLine(0, 0);
             ImGui.PushStyleColor(ImGuiCol.Text, layer.Visible ? col : col * new Num.Vector4(1, 1, 1, 0.4f));
             var label = doc.IsFollower(layer) ? $"   {layer.Name}" : layer.Name;
-            if (ImGui.Selectable(label, li == Ed.LayerIndex, ImGuiSelectableFlags.None, new Num.Vector2(nameW, rowH - 2)))
+            bool renaming = LayerRenameField(layer, nameW - ow);
+            if (!renaming && ImGui.Selectable(label, li == Ed.LayerIndex, ImGuiSelectableFlags.None, new Num.Vector2(nameW - ow, rowH - 2)))
                 Ed.LayerIndex = li;
+            if (!renaming && ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) StartLayerRename(layer);
             ImGui.PopStyleColor();
-            if (ImGui.IsItemHovered())
+            if (!renaming) LayerDragSource("timeline", layer);
+            if (ImGui.IsItemHovered() && _layerDrag == null)
                 ImGui.SetTooltip(doc.IsFollower(layer)
-                    ? $"{layer.Role} layer. Follows the timing of \"{doc.TimingLayer(layer).Name}\". Right-click to change."
-                    : $"{layer.Role} layer. Right-click for timing.");
+                    ? $"{layer.Role} layer. Follows the timing of \"{doc.TimingLayer(layer).Name}\". Right-click to change; drag to move it."
+                    : $"{layer.Role} layer. Right-click for timing and onion skin; drag up or down to move it; double-click to rename it.");
             if (ImGui.BeginPopupContextItem("timing"))
             {
                 Ed.LayerIndex = li;
+                if (ImGui.MenuItem("Rename...", "F2")) StartLayerRename(layer);
+                ImGui.Separator();
                 DrawTimingMenu(layer);
+                DrawFillBoundsMenu(layer);
+                ImGui.Separator();
+                ImGui.TextDisabled("View opacity (canvas only, not exported)");
+                LayerOpacitySlider(layer, 140 * Ui.UiScale);
+                ImGui.Separator();
+                DrawLayerOnionMenu(layer);
                 ImGui.EndPopup();
             }
             ImGui.PopID();
@@ -763,6 +1000,9 @@ public sealed partial class FinkGame
             ImGui.PopID();
         }
         ImGui.EndGroup();
+        LayerDragTarget("timeline",
+            Enumerable.Range(0, rows).Select(r => (LayerOfRow(r), namesTop.Y + headerH + r * rowH, namesTop.Y + headerH + (r + 1) * rowH)).ToList(),
+            namesTop.X, namesTop.X + nameW);
         ImGui.SetCursorScreenPos(namesTop + new Num.Vector2(nameW, 0));
 
         // ---- the grid
@@ -774,6 +1014,7 @@ public sealed partial class FinkGame
             return;
         }
         var p0 = ImGui.GetCursorScreenPos();
+        _sheet = (p0, cellW, rowH, tagH, numH);
         float width = (n + 4) * cellW;
         ImGui.InvisibleButton("cells", new Num.Vector2(width, gridH), ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight);
         bool hovered = ImGui.IsItemHovered(), active = ImGui.IsItemActive();
@@ -791,23 +1032,54 @@ public sealed partial class FinkGame
         for (int r = 0; r < rows; r++)
         {
             bool cur = rows - 1 - r == Ed.LayerIndex;
-            dl.AddRectFilled(Cell(0, r), Cell(n, r) + new Num.Vector2(0, rowH), cur ? 0x30FFFFFFu : (r % 2 == 0 ? 0x10FFFFFFu : 0x08FFFFFFu));
+            dl.AddRectFilled(Cell(0, r), Cell(n, r) + new Num.Vector2(0, rowH), cur ? Faint(0x30) : (r % 2 == 0 ? Faint(0x10) : Faint(0x08)));
         }
         for (int f = 0; f <= n; f++)
         {
             bool second = f % doc.Fps == 0;
             bool beat = f % 4 == 0;
-            uint lc = second ? 0x70FFFFFFu : beat ? 0x30FFFFFFu : 0x18FFFFFFu;
+            uint lc = second ? Faint(0x70) : beat ? Faint(0x30) : Faint(0x18);
             dl.AddLine(Cell(f, 0) - new Num.Vector2(0, second ? numH : numH * 0.3f), Cell(f, rows), lc);
         }
-        dl.AddRectFilled(Cell(Ed.FrameIndex, 0) - new Num.Vector2(0, numH), Cell(Ed.FrameIndex + 1, rows), 0x2880D0FFu);
+        dl.AddRectFilled(Cell(Ed.FrameIndex, 0) - new Num.Vector2(0, numH), Cell(Ed.FrameIndex + 1, rows), Colors.Playhead);
         for (int f = 0; f < n; f++)
         {
             bool cur = f == Ed.FrameIndex;
-            if (!cur && f % 2 == 1 && f != n - 1) continue; // odd frames only, to fit
+            if (!cur && f % 2 == 1 && f != n - 1 && !doc.IsPinned(f)) continue; // odd frames only, to fit
             var label = (f + 1).ToString();
             var sz = ImGui.CalcTextSize(label);
             dl.AddText(p0 + new Num.Vector2(f * cellW + (cellW - sz.X) / 2, tagH + (numH - sz.Y) / 2), U(cur ? text : dim), label);
+        }
+        var onionLayer = Ed.CurrentLayer;
+        var ghosts = Onion.Plan(doc, onionLayer, Ed.FrameIndex, Ed.Onion);
+        float barY = tagH + numH - 4 * sc;
+        foreach (var gh in ghosts)
+        {
+            // a bar under the frame number, as strong as the ghost is
+            uint gc = WithAlpha(gh.Tint.Packed, (uint)Math.Clamp(80 + gh.Opacity * 400, 60, 255));
+            dl.AddRectFilled(p0 + new Num.Vector2(gh.Frame * cellW + 3 * sc, barY), p0 + new Num.Vector2((gh.Frame + 1) * cellW - 3 * sc, barY + 3 * sc), gc, 1);
+        }
+        for (int f = 0; f < n; f++)
+            if (doc.IsPinned(f))
+            {
+                // a pin: a little flag at the top of the number
+                var pc = p0 + new Num.Vector2(f * cellW + cellW / 2, tagH + 2 * sc);
+                dl.AddTriangleFilled(pc + new Num.Vector2(-4 * sc, 0), pc + new Num.Vector2(4 * sc, 0), pc + new Num.Vector2(0, 5 * sc), Ed.Onion.PinTint.Packed);
+            }
+        // brackets at the ends of the onion range: drag them to show more or fewer drawings
+        var (bx0, bx1) = OnionBracketX(doc, onionLayer, ghosts, cellW);
+        if (Ed.Onion.Enabled && !onionLayer.OnionOff && onionLayer.Role != LayerRole.Reference)
+        {
+            float y0 = tagH + 2 * sc, y1 = tagH + numH - 1;
+            void Bracket(float x, int dir, Rgba tint)
+            {
+                uint c = tint.Packed;
+                dl.AddLine(p0 + new Num.Vector2(x, y0), p0 + new Num.Vector2(x, y1), c, 2 * sc);
+                dl.AddLine(p0 + new Num.Vector2(x, y0), p0 + new Num.Vector2(x + dir * 4 * sc, y0), c, 2 * sc);
+                dl.AddLine(p0 + new Num.Vector2(x, y1), p0 + new Num.Vector2(x + dir * 4 * sc, y1), c, 2 * sc);
+            }
+            Bracket(bx0, +1, Ed.Onion.BeforeTint);
+            Bracket(bx1, -1, Ed.Onion.AfterTint);
         }
 
         // ---- exposures, as blocks: one per hold
@@ -825,7 +1097,7 @@ public sealed partial class FinkGame
                 bool exists = doc.DrawingAt(layer, doc.Frames[s]) != null;
                 var a = Cell(s, r) + new Num.Vector2(1, 2);
                 var b = Cell(e + 1, r) + new Num.Vector2(-1, rowH - 2);
-                var fillCol = role * new Num.Vector4(0.5f, 0.5f, 0.5f, exists ? (layer.Visible ? 0.9f : 0.35f) : 0.12f);
+                var fillCol = new Num.Vector4(role.X, role.Y, role.Z, exists ? (layer.Visible ? 0.42f : 0.18f) : 0.08f); // reads on dark and light
                 dl.AddRectFilled(a, b, U(fillCol), 3 * sc);
                 dl.AddRect(a, b, U(role * new Num.Vector4(1, 1, 1, follower ? 0.45f : 0.9f)), 3 * sc);
                 var label = number.ToString();
@@ -838,8 +1110,8 @@ public sealed partial class FinkGame
                     dl.AddLine(new Num.Vector2(a.X + 8 * sc + sz.X, y), new Num.Vector2(b.X - 6 * sc, y), U(text * new Num.Vector4(1, 1, 1, 0.35f)));
                 }
                 // grips on both ends: drag to change where the hold starts or ends
-                dl.AddRectFilled(new Num.Vector2(b.X - 3 * sc, a.Y + 4 * sc), new Num.Vector2(b.X - 1 * sc, b.Y - 4 * sc), 0x60FFFFFFu);
-                dl.AddRectFilled(new Num.Vector2(a.X + 1 * sc, a.Y + 4 * sc), new Num.Vector2(a.X + 3 * sc, b.Y - 4 * sc), 0x30FFFFFFu);
+                dl.AddRectFilled(new Num.Vector2(b.X - 3 * sc, a.Y + 4 * sc), new Num.Vector2(b.X - 1 * sc, b.Y - 4 * sc), Faint(0x60));
+                dl.AddRectFilled(new Num.Vector2(a.X + 1 * sc, a.Y + 4 * sc), new Num.Vector2(a.X + 3 * sc, b.Y - 4 * sc), Faint(0x30));
             }
         }
         // ---- keyed points: diamonds on their keys, a line between (solid when smooth)
@@ -847,7 +1119,7 @@ public sealed partial class FinkGame
         {
             var t = keyed[k];
             int r = rows + k;
-            dl.AddRectFilled(Cell(0, r), Cell(n, r) + new Num.Vector2(0, rowH), 0x14F0D040u);
+            dl.AddRectFilled(Cell(0, r), Cell(n, r) + new Num.Vector2(0, rowH), WithAlpha(Colors.Accent, 0x14));
             var keys = doc.KeysOf(t);
             Num.Vector2? last = null;
             for (int f = 0; f < n; f++)
@@ -855,11 +1127,11 @@ public sealed partial class FinkGame
                 if (!keys.ContainsKey(doc.Frames[f])) continue;
                 var c = Cell(f, r) + new Num.Vector2(cellW / 2, rowH / 2);
                 if (last is { } l)
-                    dl.AddLine(l + new Num.Vector2(5 * sc, 0), c - new Num.Vector2(5 * sc, 0), t.Smooth ? 0xC040D0F0u : 0x6040D0F0u, t.Smooth ? 2 * sc : 1 * sc);
+                    dl.AddLine(l + new Num.Vector2(5 * sc, 0), c - new Num.Vector2(5 * sc, 0), t.Smooth ? WithAlpha(Colors.Accent, 0xC0) : WithAlpha(Colors.Accent, 0x60), t.Smooth ? 2 * sc : 1 * sc);
                 float d = 5 * sc;
                 bool dragging = _keyDrag is { } kd && kd.track.Id == t.Id && kd.from == f;
                 dl.AddQuadFilled(c + new Num.Vector2(0, -d), c + new Num.Vector2(d, 0), c + new Num.Vector2(0, d), c + new Num.Vector2(-d, 0),
-                    dragging ? 0x6040D0F0u : 0xFF40D0F0u);
+                    dragging ? WithAlpha(Colors.Accent, 0x60) : Colors.Accent);
                 last = c;
             }
             if (_keyDrag is { } drag && drag.track.Id == t.Id && mf >= 0 && mf < n && mf != drag.from)
@@ -871,11 +1143,51 @@ public sealed partial class FinkGame
         }
 
         int curRow = rows - 1 - Ed.LayerIndex;
-        dl.AddRect(Cell(Ed.FrameIndex, curRow), Cell(Ed.FrameIndex + 1, curRow) + new Num.Vector2(0, rowH), 0xFFFFFFFFu, 2 * sc, ImDrawFlags.None, 2);
+        dl.AddRect(Cell(Ed.FrameIndex, curRow), Cell(Ed.FrameIndex + 1, curRow) + new Num.Vector2(0, rowH), Faint(0xFF), 2 * sc, ImDrawFlags.None, 2);
+
+        // ---- the cell selection: a tinted box on each of its layers
+        void SelectionBox(IEnumerable<Layer> layers, int from, int to, bool fill)
+        {
+            foreach (var l in layers)
+            {
+                int r = RowOf(l);
+                var a = Cell(from, r) + new Num.Vector2(0, 1);
+                var b = Cell(to + 1, r) + new Num.Vector2(0, rowH - 1);
+                if (fill) dl.AddRectFilled(a, b, WithAlpha(Colors.Accent, 0x38));
+                dl.AddRect(a, b, Colors.Accent, 0, ImDrawFlags.None, 2 * sc);
+            }
+        }
+        if (_cellSel is { } shownSel) SelectionBox(shownSel.Layers, shownSel.From, shownSel.To, true);
 
         // ---- interaction
         bool inGrid = mf >= 0 && mf < n && mr >= 0 && mr < rows;
         float edge = 6 * sc;
+
+        // ---- a "+" on an empty cell, or just past the last frame: click it for a new drawing there
+        bool busy = _grab != null || _tagDrag != null || _onionDrag != null || _keyDrag != null || _scrubbing || _layerDrag != null
+                    || _marquee != null || _selDrag != null;
+        bool plusHit = false;
+        if (hovered && !busy && mr >= 0 && mr < rows && mf >= 0 && mf < n + 4 && !ImGui.IsPopupOpen("cell"))
+        {
+            var layer = LayerOfRow(mr);
+            if (!layer.Locked && (mf >= n || doc.ExposureOf(doc.TimingLayer(layer), doc.Frames[mf]) == null))
+            {
+                var c = Cell(mf, mr) + new Num.Vector2(cellW / 2, rowH / 2);
+                float rad = Math.Min(cellW, rowH) * 0.36f, arm = rad * 0.55f;
+                plusHit = Num.Vector2.DistanceSquared(ImGui.GetMousePos(), c) <= rad * rad * 1.7f;
+                dl.AddCircleFilled(c, rad, plusHit ? Colors.Accent : Faint(0x38));
+                uint pc = plusHit ? 0xFF1A1A1Au : Faint(0xD0);
+                dl.AddLine(c - new Num.Vector2(arm, 0), c + new Num.Vector2(arm, 0), pc, 2 * sc);
+                dl.AddLine(c - new Num.Vector2(0, arm), c + new Num.Vector2(0, arm), pc, 2 * sc);
+                if (plusHit)
+                {
+                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                    ImGui.SetTooltip(mf < n ? $"New drawing on {layer.Name}, frame {mf + 1}\n(Drag from here to select cells.)"
+                        : $"New frame{(mf > n ? "s" : "")} up to {mf + 1}, with a new drawing on {layer.Name}" +
+                          (mf > n ? "\nThe frames between hold what each layer shows now." : ""));
+                }
+            }
+        }
 
         // ---- tags, in the top row
         Tag? tagUnder = null;
@@ -897,21 +1209,39 @@ public sealed partial class FinkGame
             if (mouse.Y >= 0 && mouse.Y < tagH && mouse.X >= ta * cellW && mouse.X < (tb + 1) * cellW)
             {
                 tagUnder = tag;
-                tagStartEdge = mouse.X < ta * cellW + edge;
-                tagEndEdge = mouse.X > (tb + 1) * cellW - edge;
+                // generous ends (a pen is not a mouse), but always some middle left to slide it by
+                float tagEdge = Math.Min(10 * sc, (b.X - a.X) / 3);
+                tagStartEdge = mouse.X < ta * cellW + tagEdge;
+                tagEndEdge = !tagStartEdge && mouse.X > (tb + 1) * cellW - tagEdge;
+                if (_tagDrag == null && _grab == null)
+                {
+                    // grips on both ends, so it's clear they can be dragged
+                    uint grip = 0xD0FFFFFFu;
+                    dl.AddRectFilled(new Num.Vector2(a.X + 2 * sc, a.Y + 3 * sc), new Num.Vector2(a.X + 4 * sc, b.Y - 3 * sc), grip);
+                    dl.AddRectFilled(new Num.Vector2(b.X - 4 * sc, a.Y + 3 * sc), new Num.Vector2(b.X - 2 * sc, b.Y - 3 * sc), grip);
+                }
             }
         }
         if (_tagDrag is { } td)
         {
-            int at = Math.Clamp(mf, 0, n - 1);
-            var (ta, tb) = td.Kind switch
+            // stretching a tag's end past the last frame adds frames (up to the "+" columns)
+            int at = Math.Clamp(mf, 0, td.Kind is TagDragKind.Start or TagDragKind.End ? n + 3 : n - 1);
+            int ta, tb;
+            if (td.Kind == TagDragKind.Move && td.Tag != null)
             {
-                TagDragKind.Start => (Math.Min(at, td.Other), Math.Max(at, td.Other)),
-                TagDragKind.End => (Math.Min(at, td.Other), Math.Max(at, td.Other)),
-                _ => (Math.Min(at, td.Other), Math.Max(at, td.Other)),
-            };
-            dl.AddRect(p0 + new Num.Vector2(ta * cellW + 1, 1), p0 + new Num.Vector2((tb + 1) * cellW - 1, tagH - 1), 0xFF40D0FFu, 3 * sc, ImDrawFlags.None, 2);
-            ImGui.SetTooltip(td.Kind == TagDragKind.Create ? $"New tag: frames {ta + 1}-{tb + 1}" : $"Frames {ta + 1}-{tb + 1}");
+                var (oa, ob) = doc.TagRange(td.Tag);
+                ta = Math.Clamp(td.Other + at - td.Press, 0, n - 1 - (ob - oa));
+                tb = ta + (ob - oa);
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            }
+            else (ta, tb) = (Math.Min(at, td.Other), Math.Max(at, td.Other));
+            bool moved = td.Kind != TagDragKind.Move || at != td.Press;
+            if (moved)
+            {
+                dl.AddRect(p0 + new Num.Vector2(ta * cellW + 1, 1), p0 + new Num.Vector2((tb + 1) * cellW - 1, tagH - 1), Colors.Accent, 3 * sc, ImDrawFlags.None, 2);
+                ImGui.SetTooltip((td.Kind == TagDragKind.Create ? "New tag: " : td.Kind == TagDragKind.Move ? $"Move {td.Tag?.Name} to " : "")
+                                 + $"frames {ta + 1}-{tb + 1}" + (tb >= n ? "   (adds frames)" : ""));
+            }
             if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
             {
                 if (td.Kind == TagDragKind.Create)
@@ -924,7 +1254,10 @@ public sealed partial class FinkGame
                     }
                 }
                 else if (td.Tag != null && doc.Tags.Contains(td.Tag))
-                    Ed.UpdateTag(td.Tag, from: ta, to: tb);
+                {
+                    if (moved) Ed.UpdateTag(td.Tag, from: ta, to: tb);
+                    else Ed.FrameIndex = doc.TagRange(td.Tag).from; // a tap: go to its first frame
+                }
                 _tagDrag = null;
             }
         }
@@ -934,7 +1267,8 @@ public sealed partial class FinkGame
             if (tagUnder != null && _grab == null)
             {
                 var (ta, tb) = doc.TagRange(tagUnder);
-                ImGui.SetTooltip($"{tagUnder.Name}: frames {ta + 1}-{tb + 1}, {tagUnder.Loop}. Play loops it. Right-click to edit; drag its ends to change it.");
+                ImGui.SetTooltip($"{tagUnder.Name}: frames {ta + 1}-{tb + 1}, {tagUnder.Loop}. Play loops it.\n" +
+                                 "Drag it to slide it; drag an end to stretch it (past the last frame adds frames). Right-click to edit.");
             }
             else if (tagUnder == null)
                 ImGui.SetTooltip("Drag here to tag frames as an animation (walk, idle...).");
@@ -958,19 +1292,35 @@ public sealed partial class FinkGame
         if (hovered && _grab == null && Grab() is { } hover)
             ImGui.SetMouseCursor(hover.Kind == BlockGrabKind.Move ? ImGuiMouseCursor.Hand : ImGuiMouseCursor.ResizeEW);
 
-        if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        // double-tap the frames or cells: onion skin on/off
+        bool doubleTap = hovered && mouse.Y >= tagH && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)
+                         && OnionBracketHit(mouse.X, bx0, bx1, sc) == null && _marquee?.Plus != true;
+        if (doubleTap)
+        {
+            _grab = null;
+            _marquee = null;
+            _selDrag = null;
+            _scrubbing = false;
+            _session.Commands.Run("onion.toggle");
+            Ed.SetStatus(Ed.Onion.Enabled ? "Onion skin on" : "Onion skin off", 1.5);
+        }
+        else if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
             if (Ed.Playing) Ed.TogglePlay();
-            if (mouse.Y < tagH)
+            // the "+" acts on release, so a drag from it can select cells instead
+            if (plusHit) _marquee = new Marquee(mf, mr, Plus: true);
+            else if (mouse.Y < tagH)
             {
                 if (tagUnder != null && (tagStartEdge || tagEndEdge))
                 {
                     var (ta, tb) = doc.TagRange(tagUnder);
                     _tagDrag = new TagDrag(tagStartEdge ? TagDragKind.Start : TagDragKind.End, tagUnder, tagStartEdge ? tb : ta);
                 }
-                else if (tagUnder != null) Ed.FrameIndex = doc.TagRange(tagUnder).from;
+                else if (tagUnder != null) _tagDrag = new TagDrag(TagDragKind.Move, tagUnder, doc.TagRange(tagUnder).from, Math.Clamp(mf, 0, n - 1));
                 else if (mf >= 0 && mf < n) _tagDrag = new TagDrag(TagDragKind.Create, null, mf);
             }
+            else if (mr < 0 && OnionBracketHit(mouse.X, bx0, bx1, sc) is { } side && Ed.Onion.Enabled && !onionLayer.OnionOff)
+                _onionDrag = side;
             else if (mr < 0) _scrubbing = true;
             else if (mr >= rows && mr < rows + keyed.Count && mf >= 0 && mf < n)
             {
@@ -983,11 +1333,46 @@ public sealed partial class FinkGame
             {
                 Ed.FrameIndex = mf;
                 Ed.LayerIndex = rows - 1 - mr;
-                _grab = Grab();
-                _grabMoved = false;
+                bool shift = ImGui.GetIO().KeyShift;
+                if (!shift && _cellSel is { } cs && cs.Layers.Contains(LayerOfRow(mr)) && mf >= cs.From && mf <= cs.To)
+                {
+                    _selDrag = mf; // drag the selection sideways
+                    _selMoved = false;
+                }
+                else
+                {
+                    _cellSel = null;
+                    // a block's middle or ends: move or stretch it; empty cells (or Shift): select
+                    _grab = shift ? null : Grab();
+                    _grabMoved = false;
+                    if (_grab == null) _marquee = new Marquee(mf, mr, Plus: false);
+                }
             }
         }
         if (active && _scrubbing && mf >= 0) Ed.FrameIndex = Math.Min(mf, n - 1);
+        if (_onionDrag is { } od)
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+            int count = OnionCountTo(doc, onionLayer, od < 0 ? -1 : +1, Math.Clamp(mf, 0, n - 1));
+            bool own = od < 0 ? onionLayer.OnionBefore != null : onionLayer.OnionAfter != null;
+            if (od < 0) { if (own) onionLayer.OnionBefore = count; else Ed.Onion.Before = count; }
+            else { if (own) onionLayer.OnionAfter = count; else Ed.Onion.After = count; }
+            ImGui.SetTooltip($"{count} drawing{(count == 1 ? "" : "s")} {(od < 0 ? "before" : "after")}{(own ? $" (\"{onionLayer.Name}\" only)" : "")}");
+            if (!ImGui.IsMouseDown(ImGuiMouseButton.Left)) _onionDrag = null;
+        }
+        else if (hovered && mr < 0 && mouse.Y >= tagH && OnionBracketHit(mouse.X, bx0, bx1, sc) != null && Ed.Onion.Enabled)
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+            ImGui.SetTooltip("Drag to onion-skin more or fewer drawings.");
+        }
+        // right-click a frame number: pin it
+        if (hovered && mr < 0 && mouse.Y >= tagH && mf >= 0 && mf < n && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+        {
+            doc.TogglePin(mf);
+            Ed.SetStatus(doc.IsPinned(mf) ? $"Frame {mf + 1} pinned: it shows (tinted) from every frame" : $"Frame {mf + 1} unpinned", 2);
+        }
+        else if (hovered && mr < 0 && mouse.Y >= tagH && _onionDrag == null && OnionBracketHit(mouse.X, bx0, bx1, sc) == null && mf >= 0 && mf < n)
+            ImGui.SetTooltip(doc.IsPinned(mf) ? $"Frame {mf + 1} is pinned. Right-click to unpin." : $"Frame {mf + 1}. Right-click to pin it for onion skin.");
         if (_keyDrag is { } kdrag && !ImGui.IsMouseDown(ImGuiMouseButton.Left))
         {
             _keyDrag = null;
@@ -1006,6 +1391,57 @@ public sealed partial class FinkGame
                     : $"{t.Name}, frame {mf + 1}: Point tool + click on the canvas sets a key here.");
         }
 
+        // a block grabbed by its middle, then dragged up or down before sideways: select cells instead
+        if (_grab is { Kind: BlockGrabKind.Move } g0 && !_grabMoved && mr >= 0 && mr < rows && doc.Layers.Contains(g0.Layer)
+            && LayerOfRow(mr) != g0.Layer && Math.Max(0, mf) == g0.PressFrame)
+        {
+            _marquee = new Marquee(g0.PressFrame, RowOf(g0.Layer), Plus: false);
+            _grab = null;
+        }
+        if (_marquee is { } mq)
+        {
+            int f1 = Math.Clamp(mf, 0, n - 1), r1 = Math.Clamp(mr, 0, rows - 1);
+            int f0 = Math.Clamp(mq.Frame, 0, n - 1);
+            int fa = Math.Min(f0, f1), fb = Math.Max(f0, f1), ra = Math.Min(mq.Row, r1), rb = Math.Max(mq.Row, r1);
+            bool tap = mf == mq.Frame && mr == mq.Row;
+            if (!tap)
+            {
+                var a = Cell(fa, ra);
+                var b = Cell(fb + 1, rb) + new Num.Vector2(0, rowH);
+                dl.AddRectFilled(a, b, WithAlpha(Colors.Accent, 0x28));
+                dl.AddRect(a, b, Colors.Accent, 0, ImDrawFlags.None, 2 * sc);
+                ImGui.SetTooltip($"{fb - fa + 1} frame{(fb > fa ? "s" : "")} on {rb - ra + 1} layer{(rb > ra ? "s" : "")}. Drag the selection to move it (Ctrl: copy).");
+            }
+            if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            {
+                if (tap && mq.Plus) Ed.NewDrawingAt(LayerOfRow(mq.Row), mq.Frame);
+                else if (!tap) _cellSel = new CellSelection(Enumerable.Range(ra, rb - ra + 1).Select(LayerOfRow).ToList(), fa, fb);
+                _marquee = null;
+            }
+        }
+        if (_selDrag is { } press && _cellSel is { } sel)
+        {
+            int at = Math.Max(0, mf);
+            _selMoved |= at != press;
+            bool copy = ImGui.GetIO().KeyCtrl;
+            int nf = Math.Max(0, sel.From + at - press), len = sel.To - sel.From;
+            if (_selMoved)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                SelectionBox(sel.Layers, nf, nf + len, false);
+                ImGui.SetTooltip($"{(copy ? "Copy" : "Move")} frames {sel.From + 1}-{sel.To + 1} to {nf + 1}-{nf + len + 1}"
+                                 + (nf + len >= n ? "   (adds frames)" : "") + (copy ? "" : "   (Ctrl: copy)"));
+            }
+            if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            {
+                if (!_selMoved) _cellSel = null; // a tap inside it: back to one cell
+                else if (Ed.MoveCells(sel.Layers, sel.From, sel.To, nf, copy)) _cellSel = sel with { From = nf, To = nf + len };
+                _selDrag = null;
+            }
+        }
+        else _selDrag = null;
+        if (_cellSel != null && hovered && ImGui.IsKeyPressed(ImGuiKey.Escape)) _cellSel = null;
+
         if (_grab is { } g)
         {
             int at = Math.Max(0, mf);
@@ -1022,7 +1458,7 @@ public sealed partial class FinkGame
                 int r = rows - 1 - doc.Layers.IndexOf(g.Layer);
                 if (g.Kind == BlockGrabKind.Move && !copy)
                     dl.AddRectFilled(Cell(g.From, r) + new Num.Vector2(1, 2), Cell(g.To + 1, r) + new Num.Vector2(-1, rowH - 2), 0xA0202020u, 3 * sc);
-                dl.AddRect(Cell(ns, r) + new Num.Vector2(1, 1), Cell(ne + 1, r) + new Num.Vector2(-1, rowH - 1), 0xFF40D0FFu, 3 * sc, ImDrawFlags.None, 2);
+                dl.AddRect(Cell(ns, r) + new Num.Vector2(1, 1), Cell(ne + 1, r) + new Num.Vector2(-1, rowH - 1), Colors.Accent, 3 * sc, ImDrawFlags.None, 2);
                 var num = doc.NumberAt(g.Layer, doc.Frames[g.From]);
                 ImGui.SetTooltip(g.Kind == BlockGrabKind.Move
                     ? $"{(copy ? "Copy" : "Move")} #{num} to frames {ns + 1}-{ne + 1}" + (copy ? "" : "   (Ctrl: copy)")
@@ -1069,7 +1505,7 @@ public sealed partial class FinkGame
             DrawCellMenu();
             ImGui.EndPopup();
         }
-        else if (hovered && inGrid && _grab == null)
+        else if (hovered && inGrid && _grab == null && _marquee == null && _selDrag == null && !plusHit)
         {
             var layer = LayerOfRow(mr);
             var number = doc.NumberAt(layer, doc.Frames[mf]);

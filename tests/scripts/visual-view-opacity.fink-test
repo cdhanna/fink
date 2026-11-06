@@ -1,0 +1,20 @@
+# A layer's view opacity: see-through on the canvas while working, never in exports.
+new 32 32
+wait 6
+hover canvas
+tool Pencil
+layer Line
+color 1
+stroke 4,4 27,4 27,27 4,27 4,4
+layer Fill
+tool Fill
+color 18
+stroke 16,16
+assert viewopacity == 100
+viewopacity Fill 35
+layer Fill
+assert viewopacity == 35
+layer Line
+assert viewopacity == 100
+wait 4
+shot view-opacity

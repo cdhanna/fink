@@ -59,6 +59,31 @@ C:/proj/fade.mono/
   - `FadeSpriteBatch` / `FadeSpriteVertex` (TEXCOORD1/2), for the shader preview
   - the in-process content builder (`Fade.MonoGame.Content`), to compile game `.fx` files
 
+## Fill boundaries
+
+- Each Fill layer says which Line layers its fills stop at. By default it's **every visible
+  Line layer** (as before). Choosing them yourself picks exactly those, and they count even
+  while hidden, so line art can be hidden and still be filled; an unpicked line layer (a
+  construction sketch, an effect line) never walls a fill in.
+- **Where:** a matrix at the bottom of the Layers panel ("Fill boundaries": fill layers down,
+  line layers across, plus a "Visible" column for the default), and "Fills Stop At" in a fill
+  layer's right-click menu on the timeline.
+- Undoable, saved with the project (`fillBounds`: line layer indices). Deleted layers simply
+  drop out. `Document.FillBoundaryCels` is the one place fills ask.
+- Script: `fillbounds <fill> all | none | <line,line>`, `assert fillbounds <fill> == ...`.
+
+## Layer view opacity
+
+- Each layer has a **view opacity** (0-100%, a slider on its row in the Layers panel, and in
+  its right-click menu on the timeline; right-click the slider for 100%). It makes a rough, a
+  reference or a fill see-through *on the canvas* while you work.
+- It is never exported: sprite sheets, atlases, data maps and asset thumbnails always show the
+  layer as drawn. Only the canvas passes `viewOpacity: true` to `Compositor.Render`; exports
+  don't go through the compositor at all. (There is no export opacity: Fink's colors are
+  palette indices, and a see-through look in the game is the game's to do.)
+- Saved with the project (per layer, like visibility); not an undo step. Onion ghosts of the
+  layer fade with it. Script: `viewopacity <layer> <0-100>`, `assert viewopacity == N`.
+
 ## Selection and transforms
 
 - **Tools:** Select (M, rectangle), Lasso (Q), Wand (W, same palette index, contiguous or
@@ -123,6 +148,24 @@ C:/proj/fade.mono/
 - **View menu** toggles each panel. **Tab** hides them all (focus mode). **F11** is fullscreen.
 - **UI scale** (Options → Interface) rebuilds the font (Segoe UI) and scales every style size.
 
+## Themes
+
+- **Picker:** Options → Interface → Theme. Built in:
+  - **Fink Purple** (the default)
+  - **Neutral Gray**: no tint, mid-gray canvas, so you judge colors against neutral gray
+  - **Dark**, **Light** and **Classic**: ImGui's own styles, with matching canvas colors
+- **What a theme sets:**
+  - ImGui's base style
+  - any ImGui color, by name (`WindowBg`, `Button`...)
+  - corner rounding
+  - the colors Fink draws itself: canvas background, checkerboard, onion tints, layer-role colors, playhead and accent
+- **Derived colors:** timeline grid lines and row shading are drawn from the theme's text color, so they show on light themes too. Selection ants, transform handles and point markers stay black and white, because they must read over any artwork.
+- **Custom themes:**
+  - "Make a copy to edit" writes the current theme to `%APPDATA%/Fink/themes/<name>.json` and opens it.
+  - Saving the file restyles Fink at once.
+  - Any `.json` in that folder appears in the picker.
+  - A broken file shows its error in Options and keeps the last good look.
+
 ## Testing and automation
 
 - `dotnet test`: Core unit tests, editor tests, and every `tests/scripts/*.fink-test` run
@@ -136,6 +179,9 @@ C:/proj/fade.mono/
   - `cmd`, `key`, `keydown/keyup`, `hover`, `stroke`, `drag`
   - `tool`, `color`, `layer`, `frame`, `set`, `bind`
   - `assert`, `wait`, `shot`
+  - `mouse down|move|up <frame> <row|tag|num>`: the real mouse over the timeline (window only),
+    for drags and taps; `window <instruction>` runs a line only in the window (asserts after
+    mouse lines). See `visual-timeline-mouse.fink-test`.
 
 ## Document model
 
@@ -232,6 +278,23 @@ BG          [1 ─────────────────────�
   - Drag a block's middle to move it; Ctrl+drag copies it (reuses the drawing). Drag either
     end to change where the hold starts or ends. Blocks cover the cells they land on and leave
     empty cells behind; dragging past the last frame adds frames.
+  - Hovering an empty cell, or the columns just past the last frame, shows a "+": click it
+    for a new blank drawing there. Past the end it adds frames up to that column first, every
+    layer holding what it showed last. Locked layers get no "+". It acts on release, so a drag
+    that starts on it selects instead.
+  - **Selecting cells:** drag across empty cells, or press a block and go up or down a row
+    before going sideways, or Shift+drag anywhere: a rectangle of frames on several layers.
+    Drag the selection sideways to move it (Ctrl: copy). It moves as a block, empty cells
+    included: it replaces what it lands on and empties what it leaves; past the end adds frames.
+    Followers move with their timing layer; locked layers stay. Moving between layers isn't
+    supported (drawings belong to their layer). A tap inside it, or Esc, drops it.
+  - **Double-tap** the frame numbers or the cells: onion skin on/off.
+  - **Renaming a layer:** double-click its name (timeline or Layers panel), F2 / Layer >
+    Rename Layer, or Rename in its right-click menu: the name becomes a text field (Enter or
+    clicking away keeps it, Esc cancels). Names are trimmed and unique in the asset, ignoring
+    case, because paste and scripts find layers by name. One undo step. Script: `renamelayer`.
+  - Drag a layer's name (in the timeline or the Layers panel) up or down to move it in the
+    stack. It's one undo step.
   - Right-click a cell: New / Duplicate Drawing, Show Drawing (reuse), Clear Cell, holds,
     Timing (own, or follow a layer).
 - **Frame commands:**
@@ -249,14 +312,40 @@ BG          [1 ─────────────────────�
   empty cells, tinted, with adjustable opacity. On twos, the previous frame is usually the
   same drawing, so frame-based onion skin would show nothing useful. Each layer's ghosts are
   drawn just under that layer, so an opaque background or reference layer below can't hide them.
+  - **On the timeline:** the frame-number row marks each frame being ghosted for the current
+    layer (red before, green after, fainter when further away). Brackets at the ends of the
+    range drag to show more or fewer drawings (up to 8 each way).
+  - **Pinned frames** (right-click a frame number, or Shift+O on the current frame) always
+    ghost, in blue, from every other frame: a key pose to keep in view. A pin already in the
+    before/after range, or showing the same drawing, isn't drawn twice. "Pins" in the toolbar
+    hides them all.
+  - **Per layer:** the dot before each layer's name turns its onion skin on or off. Its
+    right-click menu can give it its own before/after counts (the brackets then change that
+    layer's). Pins and per-layer settings are saved with the project.
+  - Which ghosts a layer gets is decided in one place (`Onion.Plan`), so the canvas and the
+    timeline always agree.
 - **Tags:** named frame ranges (walk, idle) with a loop mode: loop, ping-pong or play once.
-  They live in the timeline's top row: drag across empty space to make one, drag its ends to
-  resize it, right-click to rename, change the loop, play or delete. A tag holds its first and
+  They live in the timeline's top row: drag across empty space to make one, drag its middle to
+  slide it, drag its ends (grips show on hover) to stretch it; stretching past the last frame
+  adds frames where everything holds. A tap goes to its first frame; right-click to rename,
+  change the loop, play or delete. A tag holds its first and
   last *frames*, so frames inserted inside it make it longer; deleting an end frame moves the
   end inward.
+- **Transport bar** (under the canvas; View > Transport Bar hides it): big First, Previous,
+  Play/Pause, Next and Last buttons, and a scrubber as wide as the canvas showing tags, pins,
+  seconds and the playhead. Click or drag it to scrub.
 - **Playback:** fixed rate. With "Play Tag Only" on (the default), Play loops the tag under the
   playhead in its loop mode; otherwise the whole timeline.
 - **Per-frame points:** a pivot plus named points.
+
+## Opening .fink files *(launcher)*
+
+- `tools/install-launcher.ps1` makes double-clicking a `.fink` file open the newest build of Fink. It registers the file type for the current user only (no admin), and `-Uninstall` removes it.
+- Windows runs `%LOCALAPPDATA%\Fink\launcher\FinkLauncher.exe`. It finds the newest build under `src/Fink.App/bin` (by its newest dll) and runs it from a **copy** in `%LOCALAPPDATA%\Fink\builds\<build time>`.
+  - It copies only Windows x64 native libraries, about 18 MB.
+  - The three newest copies are kept.
+- Running a copy means an open Fink never locks `bin`, so builds always succeed. The next double-click picks up the new build.
+- Each double-click starts its own Fink window; an open Fink isn't reused yet.
 
 ## Undo history *(branching: built)*
 
@@ -286,6 +375,12 @@ BG          [1 ─────────────────────�
 - **Driver setting:** it needs Windows Ink on in the tablet driver. Options > Interface > Pen shows whether a pen has been seen.
 - **Fallback:** without Windows Ink, have the driver send a key for the eraser end and bind that key to **Eraser (hold)**.
 - **Turning it off:** Options > Interface > Pen.
+- **Barrel (side) button = right-click everywhere.** A press of the tip with the button held reaches the whole UI as a right-click: the secondary color on the canvas, pinning frames, context menus. Many drivers report the button only on the pen's own messages, so `PenAwareImGuiRenderer` rewrites that press before ImGui sees it. It stays a right-click until the pen lifts.
+  - The mouse button is read from the hardware state, which can run a frame ahead of the pen's
+    messages, so the barrel flag used to be read from before the touch and the press came out a
+    left click. Now, while a pen is in range, a new press is held back (at most 4 frames) until
+    its pen-down message arrives, and the barrel state *at that touch* decides. A tap shorter
+    than that is replayed. Options > Pen shows hovering/touching and what the last press became.
 
 ## Shader preview
 
@@ -480,6 +575,39 @@ A file from a newer Fink is refused with a message rather than misread. Later: d
 - Data in A warns that the content build premultiplies alpha.
 - The game gets `MAP_<NAME>` constants, and `fink atlas map(atlas, MAP_X)` returns the map's texture id.
 
+## 9-slice *(built)*
+
+For UI art that stretches (panels, buttons, bars): an asset gets four insets, left, top, right
+and bottom, in pixels from its edges. Stretched, the corners stay as drawn, the top and bottom
+edges stretch sideways, the left and right edges up and down, and the middle both ways.
+
+- **In Fink:** Asset > 9-Slice (also in an asset's right-click menu) turns it on at thirds.
+  - Magenta dashed guides cross the canvas. Each has a **tab outside the picture** (above it for
+    the vertical lines, left of it for the horizontal ones); drag a tab to move its line. The
+    tabs take the mouse before the canvas, so drawing is never affected. A drag is one undo step.
+  - A **preview** in the canvas's bottom-right corner shows the current frame stretched (the
+    clean frame, no onion skin). Drag it to resize; click it to fold it away.
+  - Insets are per asset (every frame stretches the same way), kept inside the canvas with at
+    least a pixel of middle, saved in the project (`slice: [l, t, r, b]` in asset.json), undoable.
+  - Script: `slice l t r b`, `slice off`, `assert slice == l t r b`.
+- **Export:** each manifest asset has `"slice": [l, t, r, b]` (or null).
+- **Engine (`Fade.MonoGame.Fink`):** `set fink sprite size spr, w, h` stretches a sprite
+  playing a 9-slice asset's clip to w x h of the drawing's pixels (the sprite's scale still
+  applies); `0, 0` goes back to as drawn.
+  - At load, every picture of a 9-slice asset gets nine more texture frames: its pieces, cut
+    where the lines cross it (trimmed pictures are cut against the canvas, so they line up).
+  - The program's sprite shows the top-left corner, which never stretches, so its scale stays
+    the program's. Eight helper sprites show the rest, copying its position, rotation, color,
+    order, outputs, shader and palette row every frame. They all turn about the same point (the
+    pivot, or the anchor), so rotation works. Flipping isn't supported while stretched.
+  - Helper ids are negative and small (-1, -2, ...). The engine's draw depth includes
+    `0.001 * id / 500`, so a big id lands outside the depth range and isn't drawn, and they
+    must not raise `highestSpriteId` either. Same-order sprites can cover a panel's edges: give
+    a panel an order of its own.
+  - The engine doesn't call `AfterVmTick` yet, so the helpers of a panel the program moves
+    trail it by a frame (FinkSystem already overrides it for when it does).
+- **Sample:** `panel` in samples/FinkSample breathes across the top of the screen.
+
 ## Asset library *(built)*
 
 - **The Assets panel:**
@@ -490,6 +618,8 @@ A file from a newer Fink is refused with a message rather than misread. Later: d
   - thumbnails are only drawn for visible rows, so a long list stays quick
 - **Above the canvas:** a slim bar with previous / next, the current asset (click it, or press **Ctrl+P**, to search and jump) and +.
 - The Asset menu lists the first 15 assets.
+
+**Export folders:** each atlas has an output folder (and optionally a code folder for the `.fbasic`). Nothing is written until one is set: Export with no folder opens the Atlas panel and says so. A relative folder is relative to the `.fink` file, so a project kept beside its game (`../Assets/Textures`) keeps working when both move. An unsaved project needs a full path. Hovering the field shows where it will write.
 
 **Saving exports:** with "Export when saving" (on by default, Atlas panel), Ctrl+S also exports every atlas that has a folder. The export runs first, because packing can move pictures and their places are saved too. An export problem is reported, and the save still happens.
 
@@ -509,6 +639,10 @@ Decided with the user:
 - **Packing:** stable by default (cells keep their place while you work, so the live Atlas
   panel doesn't jump), with a tight repack on demand / on export. Cells are trimmed to their
   content and keep their offset, so pivots don't move. Uses `set texture frame rect`.
+  - Only drawing changes keep places. Changing a setting that shapes the layout (power of
+    two, padding, max size, which assets) packs afresh, so the same settings always give the
+    same atlas and turning a setting back restores the old layout. The atlas records the
+    settings its places were packed with (`PackedWith`).
 - **Maps are mirrored textures:** every map of an atlas has the identical layout. Which data
   goes into which texture's channels is configured per atlas:
 

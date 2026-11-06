@@ -18,6 +18,23 @@ public sealed class Layer
     public LayerRole Role { get; set; }
     public bool Visible { get; set; } = true;
     public bool Locked { get; set; }
+    /// <summary>
+    /// How see-through the layer is on the canvas while you work (0..1), e.g. a rough or a
+    /// reference to draw over. Only the editor's canvas uses it: exports, atlases and thumbnails
+    /// always show the layer as drawn.
+    /// </summary>
+    public float ViewOpacity { get; set; } = 1f;
+    /// <summary>
+    /// For a Fill layer: the Line layers its fills stop at. Null means every visible Line layer
+    /// (the default). Layers picked here count even when hidden, so line art can be hidden and
+    /// still be filled. Replaced, never changed in place (undo keeps the old list).
+    /// </summary>
+    public IReadOnlyList<Layer>? FillBounds { get; set; }
+    /// <summary>No onion skin for this layer (a background, say).</summary>
+    public bool OnionOff { get; set; }
+    /// <summary>This layer's own onion counts; null uses the global ones.</summary>
+    public int? OnionBefore { get; set; }
+    public int? OnionAfter { get; set; }
 
     /// <summary>Every drawing this layer owns, exposed or not. Numbers are unique within the layer.</summary>
     public List<Drawing> Drawings { get; } = new();
@@ -110,6 +127,26 @@ public enum LoopMode
 /// </summary>
 /// <param name="Id">Stable across exports and unique in the project, so a game's TAG_ constants
 /// keep pointing at the same animation. 0 until the tag joins a project.</param>
+/// <summary>
+/// 9-slice insets, in pixels from each edge of the asset's canvas. Stretched to another size,
+/// the corners stay as drawn, the edges stretch one way and the middle both ways.
+/// </summary>
+public readonly record struct NineSlice(int Left, int Top, int Right, int Bottom)
+{
+    /// <summary>Kept inside a canvas, with at least one pixel of middle each way.</summary>
+    public NineSlice Clamp(int width, int height)
+    {
+        int l = Math.Clamp(Left, 0, width - 1), r = Math.Clamp(Right, 0, width - 1 - l);
+        int t = Math.Clamp(Top, 0, height - 1), b = Math.Clamp(Bottom, 0, height - 1 - t);
+        return new NineSlice(l, t, r, b);
+    }
+
+    /// <summary>Thirds: a starting point.</summary>
+    public static NineSlice Thirds(int width, int height) => new(width / 3, height / 3, width / 3, height / 3);
+
+    public override string ToString() => $"{Left} {Top} {Right} {Bottom}";
+}
+
 public sealed record Tag(string Name, Frame From, Frame To, LoopMode Loop = LoopMode.Forward, int Id = 0);
 
 /// <summary>A grid of palette indices.</summary>
@@ -163,6 +200,19 @@ public sealed class Document
     public List<Frame> Frames { get; } = new();
     public int Fps { get; set; } = 12;
     public List<Tag> Tags { get; } = new();
+    /// <summary>9-slice insets for stretching the asset (panels, buttons), or null when it doesn't stretch.</summary>
+    public NineSlice? Slice { get; set; }
+    /// <summary>Frames pinned for onion skin: their drawings show (tinted) from every other frame.</summary>
+    public List<Frame> OnionPins { get; } = new();
+
+    public bool IsPinned(int frameIndex) => frameIndex >= 0 && frameIndex < Frames.Count && OnionPins.Contains(Frames[frameIndex]);
+
+    public void TogglePin(int frameIndex)
+    {
+        var f = Frames[frameIndex];
+        if (!OnionPins.Remove(f)) OnionPins.Add(f);
+    }
+
     /// <summary>Named points and the pivot.</summary>
     public List<PointTrack> Points { get; } = new();
 
@@ -357,7 +407,24 @@ public sealed class Document
         return null;
     }
 
-    /// <summary>The visible Line layers' cels on a frame; the boundary that fills respect.</summary>
+    /// <summary>
+    /// What a fill on <paramref name="fill"/> stops at, on a frame: the Line layers it's mapped
+    /// to (<see cref="Layer.FillBounds"/>), or every visible Line layer when it has no mapping.
+    /// </summary>
+    public IEnumerable<Cel> FillBoundaryCels(Layer fill, Frame frame)
+    {
+        if (fill.FillBounds is not { } bounds) return VisibleLineCels(frame);
+        return Layers.Where(l => l.Role == LayerRole.Line && bounds.Contains(l))
+            .Select(l => TryGetCel(l, frame, out var cel) ? cel : null)
+            .OfType<Cel>()
+            .ToList();
+    }
+
+    /// <summary>The Line layers a Fill layer stops at now (its mapping, or the visible ones).</summary>
+    public IEnumerable<Layer> FillBoundaryLayers(Layer fill) =>
+        Layers.Where(l => l.Role == LayerRole.Line && (fill.FillBounds is { } b ? b.Contains(l) : l.Visible));
+
+    /// <summary>The visible Line layers' cels on a frame; the boundary that fills respect by default.</summary>
     public IEnumerable<Cel> VisibleLineCels(Frame frame)
     {
         foreach (var layer in Layers)
@@ -375,8 +442,9 @@ public sealed class Document
         internal List<Frame> Frames { get; init; } = null!;
         internal List<Layer> Layers { get; init; } = null!;
         internal Dictionary<(Guid, Guid), Drawing> Exposures { get; init; } = null!;
-        internal Dictionary<Layer, (List<Drawing> drawings, Layer? follows)> LayerState { get; init; } = null!;
+        internal Dictionary<Layer, (List<Drawing> drawings, Layer? follows, IReadOnlyList<Layer>? fillBounds)> LayerState { get; init; } = null!;
         internal int Fps { get; init; }
+        internal NineSlice? Slice { get; init; }
         internal List<Tag> Tags { get; init; } = null!;
         internal List<PointTrack> Points { get; init; } = null!;
         internal Dictionary<int, Dictionary<Frame, PointXY>> PointKeys { get; init; } = null!;
@@ -387,8 +455,9 @@ public sealed class Document
         Frames = Frames.ToList(),
         Layers = Layers.ToList(),
         Exposures = new Dictionary<(Guid, Guid), Drawing>(_exposures),
-        LayerState = Layers.ToDictionary(l => l, l => (l.Drawings.ToList(), l.Follows)),
+        LayerState = Layers.ToDictionary(l => l, l => (l.Drawings.ToList(), l.Follows, l.FillBounds)),
         Fps = Fps,
+        Slice = Slice,
         Tags = Tags.ToList(),
         Points = Points.ToList(),
         PointKeys = PointKeys.ToDictionary(kv => kv.Key, kv => new Dictionary<Frame, PointXY>(kv.Value)),
@@ -401,13 +470,15 @@ public sealed class Document
         Layers.Clear();
         Layers.AddRange(s.Layers);
         _exposures = new Dictionary<(Guid, Guid), Drawing>(s.Exposures);
-        foreach (var (layer, (drawings, follows)) in s.LayerState)
+        foreach (var (layer, (drawings, follows, fillBounds)) in s.LayerState)
         {
             layer.Drawings.Clear();
             layer.Drawings.AddRange(drawings);
             layer.Follows = follows;
+            layer.FillBounds = fillBounds;
         }
         Fps = s.Fps;
+        Slice = s.Slice;
         Tags.Clear();
         Tags.AddRange(s.Tags);
         Points.Clear();

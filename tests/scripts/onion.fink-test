@@ -1,0 +1,55 @@
+# Onion skin: by drawing, per layer, and pinned frames.
+new 16 16
+hover canvas
+tool Pencil
+layer Line
+color 1
+stroke 1,1
+key Alt+N
+stroke 2,2
+key Alt+N
+stroke 3,3
+key Alt+N
+stroke 4,4
+key Alt+N
+stroke 5,5
+assert track Line == 1 2 3 4 5
+frame 3
+assert ghosts Line == b2 a4
+onion counts 2 2
+assert ghosts Line == b1 b2 a4 a5
+
+# per layer: off, then its own counts
+onion layer Line off
+assert ghosts Line == none
+onion layer Line on
+onion layer Line 0 1
+assert ghosts Line == a4
+onion layer Line default
+assert ghosts Line == b1 b2 a4 a5
+key O
+assert ghosts Line == none
+key O
+
+# pins: frame 5 shows from everywhere; Shift+O pins the current frame
+onion counts 1 1
+onion pin 5
+frame 1
+assert ghosts Line == a2 p5
+frame 3
+key Shift+O
+frame 4
+assert ghosts Line == b3 a5
+# a pin showing the same drawing as here has nothing to add
+frame 5
+assert ghosts Line == p3 b4
+cmd onion.pins
+assert ghosts Line == b4
+cmd onion.pins
+
+# pins and per-layer settings are saved with the project
+save out/onion-test/onion.fink
+new 8 8
+open out/onion-test/onion.fink
+frame 1
+assert ghosts Line == a2 p3 p5

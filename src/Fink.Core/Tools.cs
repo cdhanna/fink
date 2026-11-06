@@ -159,7 +159,7 @@ public sealed class FillTool : Tool
             Raster.FillShape(ctx.Session, colors, x, y, ctx.Color, ctx.Settings.FillContiguous);
             return;
         }
-        Raster.Fill(ctx.Session, ctx.Document.VisibleLineCels(ctx.Frame), x, y, ctx.Color,
+        Raster.Fill(ctx.Session, ctx.Document.FillBoundaryCels(ctx.Layer, ctx.Frame), x, y, ctx.Color,
             ctx.Settings.GapClose, ctx.Settings.FillContiguous);
     }
 }

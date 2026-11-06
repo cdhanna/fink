@@ -46,6 +46,14 @@ public sealed partial class FinkGame
         Ed.ChangeStamp * 31 + Ed.ViewVariant * 7 + Ed.AtlasIndex * 131
         + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Ed.Project) * 1_000_003L;
 
+    /// <summary>Where a folder setting actually points: relative ones are relative to the project file.</summary>
+    private string FolderTooltip(string folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return "A full path, or one relative to the .fink file (like ../game/Assets/Textures).";
+        try { return "Writes to " + AtlasExport.ResolveFolder(folder, Ed.FilePath == null ? null : Path.GetDirectoryName(Ed.FilePath)); }
+        catch (Exception e) { return e.Message; }
+    }
+
     private void UploadAtlas()
     {
         var b = _atlasBuild;
@@ -117,9 +125,11 @@ public sealed partial class FinkGame
             var folder = config.OutputFolder;
             ImGui.SetNextItemWidth(-80 * sc);
             if (ImGui.InputTextWithHint("Folder", "the game's Assets/Textures folder", ref folder, 512)) { config.OutputFolder = folder; project.Touch(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(FolderTooltip(config.OutputFolder));
             var code = config.CodeFolder;
             ImGui.SetNextItemWidth(-80 * sc);
             if (ImGui.InputTextWithHint("Code", "where fink_<atlas>.fbasic goes (default: Folder)", ref code, 512)) { config.CodeFolder = code; project.Touch(); }
+            if (ImGui.IsItemHovered() && code.Trim().Length > 0) ImGui.SetTooltip(FolderTooltip(config.CodeFolder));
             var content = config.ContentPath;
             ImGui.SetNextItemWidth(-80 * sc);
             if (ImGui.InputTextWithHint("Load as", config.EffectiveContentPath, ref content, 256)) { config.ContentPath = content; project.Touch(); }
@@ -135,7 +145,7 @@ public sealed partial class FinkGame
             }
             ImGui.SameLine();
             bool pow2 = config.PowerOfTwo;
-            if (ImGui.Checkbox("Power of two", ref pow2)) { config.PowerOfTwo = pow2; config.LastWidth = config.LastHeight = 0; project.Touch(); _atlasSettingsDirty = true; }
+            if (ImGui.Checkbox("Power of two", ref pow2)) { config.PowerOfTwo = pow2; project.Touch(); _atlasSettingsDirty = true; }
             int pad = config.Padding;
             ImGui.SetNextItemWidth(110 * sc);
             if (ImGui.InputInt("Padding", ref pad)) { config.Padding = Math.Clamp(pad, 0, 16); project.Touch(); _atlasSettingsDirty = true; }
@@ -177,7 +187,7 @@ public sealed partial class FinkGame
             var size = new Num.Vector2(b.Width, b.Height) * _atlasZoom;
             var dl = ImGui.GetWindowDrawList();
             // a checkerboard shows what's empty
-            dl.AddRectFilled(p0, p0 + size, 0xFF2A2630u);
+            dl.AddRectFilled(p0, p0 + size, Colors.Background);
             ImGui.Image(_atlasTextureId, size);
             bool hovered = ImGui.IsItemHovered();
             var mouse = (ImGui.GetMousePos() - p0) / _atlasZoom;
@@ -190,7 +200,7 @@ public sealed partial class FinkGame
                 var e = a + new Num.Vector2(c.W, c.H) * _atlasZoom;
                 bool isMine = mine?.Contains(i) == true;
                 bool over = hovered && mouse.X >= c.X && mouse.Y >= c.Y && mouse.X < c.X + c.W && mouse.Y < c.Y + c.H;
-                if (isMine) dl.AddRect(a - Num.Vector2.One, e + Num.Vector2.One, 0xFF40D0FFu);
+                if (isMine) dl.AddRect(a - Num.Vector2.One, e + Num.Vector2.One, Colors.Accent);
                 else dl.AddRect(a, e, 0x30FFFFFFu);
                 if (!over) continue;
                 dl.AddRect(a - Num.Vector2.One * 2, e + Num.Vector2.One * 2, 0xFFFFFFFFu, 0, ImDrawFlags.None, 2);

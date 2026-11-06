@@ -17,6 +17,20 @@ internal static class PenInput
 {
     /// <summary>True while a pen is near the screen upside down.</summary>
     public static bool Eraser { get; private set; }
+    /// <summary>True while the pen's barrel (side) button is held.</summary>
+    public static bool Barrel { get; private set; }
+    /// <summary>True while a pen is close enough to the screen to be tracked (hovering or touching).</summary>
+    public static bool InRange { get; private set; }
+    /// <summary>True while the pen touches the screen.</summary>
+    public static bool Contact { get; private set; }
+    /// <summary>How many times the pen has touched down; with <see cref="BarrelAtDown"/>, the latest one.</summary>
+    public static long Downs { get; private set; }
+    /// <summary>Whether the barrel button was held when the pen last touched down.</summary>
+    public static bool BarrelAtDown { get; private set; }
+    /// <summary>The <see cref="Downs"/> the input code has dealt with.</summary>
+    public static long DownsSeen { get; set; }
+    /// <summary>What the last press turned into (for the Options screen).</summary>
+    public static string LastPress { get; set; } = "";
     /// <summary>True once any pen has been seen (for the Options screen).</summary>
     public static bool PenSeen { get; private set; }
     public static bool Hooked { get; private set; }
@@ -35,21 +49,34 @@ internal static class PenInput
         Hooked = _old != IntPtr.Zero;
     }
 
-    private const uint WmPointerUpdate = 0x0245, WmPointerDown = 0x0246, WmPointerEnter = 0x0249, WmPointerLeave = 0x024A;
+    private const uint WmPointerUpdate = 0x0245, WmPointerDown = 0x0246, WmPointerUp = 0x0247, WmPointerEnter = 0x0249, WmPointerLeave = 0x024A;
+    private const uint PointerFlagInRange = 0x2, PointerFlagInContact = 0x4;
     private const uint PtPen = 3;
-    private const uint PenFlagInverted = 0x2, PenFlagEraser = 0x4;
+    private const uint PenFlagBarrel = 0x1, PenFlagInverted = 0x2, PenFlagEraser = 0x4;
 
     private static IntPtr Proc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
-        if (msg is WmPointerUpdate or WmPointerDown or WmPointerEnter or WmPointerLeave)
+        if (msg is WmPointerUpdate or WmPointerDown or WmPointerUp or WmPointerEnter or WmPointerLeave)
         {
             uint id = (uint)(wParam.ToInt64() & 0xFFFF);
             if (GetPointerType(id, out var type) && type == PtPen)
             {
                 PenSeen = true;
-                if (msg == WmPointerLeave) Eraser = false;
+                if (msg == WmPointerLeave) Eraser = Barrel = InRange = Contact = false;
                 else if (GetPointerPenInfo(id, out var info))
+                {
                     Eraser = (info.penFlags & (PenFlagInverted | PenFlagEraser)) != 0;
+                    Barrel = (info.penFlags & PenFlagBarrel) != 0;
+                    InRange = (info.pointerInfo.pointerFlags & PointerFlagInRange) != 0 || msg != WmPointerUp;
+                    Contact = msg != WmPointerUp && (info.pointerInfo.pointerFlags & PointerFlagInContact) != 0;
+                }
+                if (msg == WmPointerDown)
+                {
+                    BarrelAtDown = Barrel;
+                    Contact = true;
+                    Downs++;
+                }
+                else if (msg == WmPointerUp) Contact = false;
             }
         }
         return CallWindowProcW(_old, hwnd, msg, wParam, lParam);

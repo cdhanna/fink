@@ -8,3 +8,15 @@ tests/scripts/out/
 
 # FadeBasic.Build writes the compiled program here
 Launch/
+
+# test scripts that save projects write here (run from the repo root)
+out/
+
+# sample games: kept locally, not in the repo for now. samples/shaders is part of the app
+# (Fink.App copies it into its output; the Shader panel lists it), so it stays.
+samples/*
+!samples/shaders/
+
+# images: generated (exports, screenshots, atlases). The app's own icon is the exception.
+*.png
+!src/Fink.App/Assets/fink-icon.png

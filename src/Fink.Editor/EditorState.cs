@@ -160,7 +160,18 @@ public sealed class EditorState
 
     public byte Primary { get; set; } = 1;
     public byte Secondary { get; set; } = 6;
+    /// <summary>The drawing brush (Pencil, Line) and the fill settings.</summary>
     public ToolSettings ToolSettings { get; } = new();
+    /// <summary>The eraser's own brush: the Eraser tool, the pen's eraser end and the eraser hold key use it.</summary>
+    public ToolSettings EraserSettings { get; } = new() { Size = 3, PixelPerfect = false };
+
+    /// <summary>True when a press on the canvas would erase.</summary>
+    public bool Erasing => Momentary == Momentary.Eraser || (Momentary == Momentary.None && _tool is EraserTool);
+
+    /// <summary>The brush in use right now: the eraser's while erasing, otherwise the drawing brush.</summary>
+    public ToolSettings Brush => Erasing ? EraserSettings : ToolSettings;
+
+    private ToolSettings SettingsFor(Tool tool) => tool is EraserTool ? EraserSettings : ToolSettings;
     public OnionSettings Onion { get; } = new();
     public CanvasView View { get; } = new();
     /// <summary>When a tool can't edit the current layer, switch to the nearest one it can.</summary>
@@ -264,7 +275,7 @@ public sealed class EditorState
         ms.Position = 0;
         var copy = ProjectFile.Read(ms).Assets[0];
         // read gave it its own palette object: rebuild against ours
-        var doc = new Document(copy.Width, copy.Height, Project.Palette) { Name = Project.UniqueName(source.Name + " copy"), Fps = copy.Fps, Owner = Project };
+        var doc = new Document(copy.Width, copy.Height, Project.Palette) { Name = Project.UniqueName(source.Name + " copy"), Fps = copy.Fps, Slice = copy.Slice, Owner = Project };
         doc.Frames.AddRange(copy.Frames);
         doc.Layers.AddRange(copy.Layers);
         foreach (var l in copy.Layers)
@@ -534,6 +545,26 @@ public sealed class EditorState
         LayerIndex = to;
     }
 
+    /// <summary>Moves a layer to another place in the stack (dragging it), and selects it.</summary>
+    public void MoveLayerTo(Layer layer, int to)
+    {
+        Settle();
+        int from = Document.Layers.IndexOf(layer);
+        if (from < 0) return;
+        DocumentOps.MoveLayer(Document, History, from, Math.Clamp(to, 0, Document.Layers.Count - 1));
+        LayerIndex = Document.Layers.IndexOf(layer);
+    }
+
+    /// <summary>The timeline's "+" on an empty cell: a new blank drawing there, adding frames if it's past the end.</summary>
+    public void NewDrawingAt(Layer layer, int frameIndex)
+    {
+        Settle();
+        Playing = false;
+        if (!DocumentOps.NewDrawingAt(Document, History, layer, frameIndex)) return;
+        FrameIndex = frameIndex;
+        LayerIndex = Document.Layers.IndexOf(layer);
+    }
+
     private string NextLayerName(string prefix)
     {
         int n = 1;
@@ -594,6 +625,32 @@ public sealed class EditorState
         Settle();
         if (DocumentOps.PlaceHold(Document, History, layer, from, to, newFrom, newTo, copy))
             FrameIndex = newFrom;
+    }
+
+    /// <summary>Moves or copies a block of cells (a timeline selection) so it starts at <paramref name="newFrom"/>.</summary>
+    public bool MoveCells(IReadOnlyList<Layer> layers, int from, int to, int newFrom, bool copy)
+    {
+        Settle();
+        Playing = false;
+        if (!DocumentOps.MoveCells(Document, History, layers.Where(l => !l.Locked), from, to, newFrom, copy)) return false;
+        FrameIndex = Math.Max(0, newFrom);
+        return true;
+    }
+
+    /// <summary>Renames a layer; says why on the status line when it can't.</summary>
+    public bool RenameLayer(Layer layer, string name)
+    {
+        Settle();
+        if (DocumentOps.RenameLayer(Document, History, layer, name) is not { } why) return true;
+        SetStatus(why);
+        return false;
+    }
+
+    /// <summary>Which Line layers a Fill layer's fills stop at (null: every visible one).</summary>
+    public void SetFillBounds(Layer fill, IEnumerable<Layer>? lines)
+    {
+        Settle();
+        DocumentOps.SetFillBounds(Document, History, fill, lines);
     }
 
     public void SetFollows(Layer layer, Layer? source)
@@ -691,9 +748,9 @@ public sealed class EditorState
     /// <summary>Packs an atlas (stable unless tight). Packing remembers places, so it marks the project changed.</summary>
     public AtlasBuild BuildAtlas(AtlasConfig config, bool tight = false)
     {
-        var before = (config.LastWidth, config.LastHeight, config.Placements.Count);
+        var before = (config.LastWidth, config.LastHeight, config.Placements.Count, config.PackedWith);
         var build = AtlasBuilder.Build(Project, config, tight);
-        if (tight || before != (config.LastWidth, config.LastHeight, config.Placements.Count)) Project.Touch();
+        if (tight || before != (config.LastWidth, config.LastHeight, config.Placements.Count, config.PackedWith)) Project.Touch();
         return build;
     }
 
@@ -710,7 +767,7 @@ public sealed class EditorState
             try
             {
                 var build = AtlasBuilder.Build(Project, config);
-                written.AddRange(AtlasExport.Write(Project, build));
+                written.AddRange(AtlasExport.Write(Project, build, FilePath == null ? null : Path.GetDirectoryName(FilePath)));
             }
             catch (Exception e)
             {
@@ -726,6 +783,13 @@ public sealed class EditorState
     }
 
     public void SetFps(int fps) => DocumentOps.SetFps(Document, History, fps);
+
+    /// <summary>Sets or removes the current asset's 9-slice insets.</summary>
+    public void SetSlice(NineSlice? slice)
+    {
+        Settle();
+        DocumentOps.SetSlice(Document, History, slice);
+    }
 
     public void MoveFrame(int delta)
     {
@@ -986,7 +1050,7 @@ public sealed class EditorState
             ? (button == PointerButton.Secondary ? (byte)0 : ChannelBrush)
             : button == PointerButton.Secondary ? Secondary : Primary;
         var why = _stroke.Begin(tool, Document, CurrentFrame, CurrentLayer,
-            paint, ToolSettings, x, y, mods.HasFlag(Mods.Shift), clip, channel);
+            paint, SettingsFor(tool), x, y, mods.HasFlag(Mods.Shift), clip, channel);
         if (why != null) SetStatus(why);
         else _owner = PointerOwner.Stroke;
     }

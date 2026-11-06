@@ -1,0 +1,40 @@
+# 9-slice: a panel drawn once, stretched by its guides. In the window: guides, tabs and the preview.
+new 24 16
+wait 6
+hover canvas
+tool Pencil
+layer Line
+color 1
+stroke 1,1 22,1 22,14 1,14 1,1
+stroke 2,2 4,2
+stroke 2,2 2,4
+stroke 21,13 19,13
+stroke 21,13 21,11
+layer Fill
+tool Fill
+color 9
+stroke 12,8
+
+assert slice == off
+cmd asset.nineSlice
+assert slice == 8 5 8 5
+slice 5 5 5 5
+assert slice == 5 5 5 5
+# kept inside the canvas, with a pixel of middle left
+slice 20 3 20 3
+assert slice == 20 3 3 3
+cmd edit.undo
+assert slice == 5 5 5 5
+
+# saved with the project, and undone like anything else
+save out/nine-slice-test/panel.fink
+new 8 8
+assert slice == off
+open out/nine-slice-test/panel.fink
+assert slice == 5 5 5 5
+wait 4
+shot nine-slice
+slice off
+assert slice == off
+cmd edit.undo
+assert slice == 5 5 5 5

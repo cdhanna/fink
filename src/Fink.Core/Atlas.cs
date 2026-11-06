@@ -28,6 +28,12 @@ public sealed class AtlasConfig
     public Dictionary<string, int[]> Placements { get; set; } = new();
     public int LastWidth { get; set; }
     public int LastHeight { get; set; }
+    /// <summary>
+    /// The settings the remembered places were packed with (<see cref="AtlasBuilder.LayoutKey"/>).
+    /// When the settings change, the places are dropped and everything packs afresh, so the same
+    /// settings always give the same atlas; only drawing changes keep pictures where they were.
+    /// </summary>
+    public string PackedWith { get; set; } = "";
 
     public string EffectiveContentPath => string.IsNullOrWhiteSpace(ContentPath) ? $"Textures/{Name}" : ContentPath.Trim().Replace('\\', '/');
 }
@@ -267,6 +273,16 @@ public static class AtlasBuilder
         var big = cells.FirstOrDefault(c => c.W + pad * 2 > max || c.H + pad * 2 > max);
         if (big != null) return (1, 1, $"A {big.W}x{big.H} picture doesn't fit in {max}x{max}.");
 
+        // settings changed since the places were made: start again (an older project with no
+        // record adopts what it has)
+        var layout = LayoutKey(config);
+        if (tight || (config.PackedWith.Length > 0 && config.PackedWith != layout))
+        {
+            config.Placements = new();
+            config.LastWidth = config.LastHeight = 0;
+        }
+        config.PackedWith = layout;
+
         var sizes = new List<(int w, int h)>();
         if (!tight && config.LastWidth > 0 && config.LastHeight > 0) sizes.Add((config.LastWidth, config.LastHeight));
         long area = cells.Sum(c => (long)(c.W + pad) * (c.H + pad));
@@ -292,6 +308,11 @@ public static class AtlasBuilder
         }
         return (1, 1, $"Everything doesn't fit in {max}x{max}. Raise the max size or split the assets into another atlas.");
     }
+
+    /// <summary>Everything that decides the layout apart from the pictures themselves.</summary>
+    public static string LayoutKey(AtlasConfig c) =>
+        $"pot={(c.PowerOfTwo ? 1 : 0)};pad={c.Padding};max={c.MaxSize};" +
+        (c.IncludeAll ? "all" : "assets=" + string.Join(",", c.AssetIds.Distinct().OrderBy(i => i)));
 
     private static int Round(AtlasConfig c, int v)
     {

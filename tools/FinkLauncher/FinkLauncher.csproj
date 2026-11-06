@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!--
+        What Windows runs when you double-click a .fink file (tools/install-launcher.ps1 sets that up).
+
+        It runs the newest build of Fink from src/Fink.App/bin, but from a COPY of it, in
+        %LOCALAPPDATA%\Fink\builds\<build time>. Running Fink straight out of bin would lock bin,
+        and the next build would fail while Fink was open.
+    -->
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <RollForward>Major</RollForward>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <AssemblyName>FinkLauncher</AssemblyName>
+        <ApplicationIcon>..\..\src\Fink.App\Assets\Icon.ico</ApplicationIcon>
+    </PropertyGroup>
+</Project>

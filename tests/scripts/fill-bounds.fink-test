@@ -1,0 +1,46 @@
+# Fill layers stop at the line layers they're mapped to (default: every visible one).
+new 16 16
+wait 6
+hover canvas
+# a box on Line, a wall down the middle on a second line layer
+tool Pencil
+layer Line
+color 1
+stroke 1,1 14,1 14,14 1,14 1,1
+cmd layer.addLine
+layer "Line 1"
+color 2
+stroke 8,1 8,14
+layer Fill
+tool Fill
+color 9
+assert fillbounds Fill == all
+
+# default: both line layers are walls, so only the left half fills
+stroke 4,8
+assert pixel Fill 4,8 == 9
+assert pixel Fill 11,8 == 0
+cmd edit.undo
+
+# mapped to Line only: the wall doesn't stop it
+fillbounds Fill Line
+assert fillbounds Fill == Line
+stroke 4,8
+assert pixel Fill 11,8 == 9
+cmd edit.undo
+cmd edit.undo
+assert fillbounds Fill == all
+
+# a mapped layer counts even when hidden; with the default, a hidden one doesn't
+fillbounds Fill Line,"Line 1"
+layer "Line 1"
+cmd layer.toggleVisible
+layer Fill
+stroke 4,8
+assert pixel Fill 11,8 == 0
+cmd edit.undo
+fillbounds Fill all
+stroke 4,8
+assert pixel Fill 11,8 == 9
+wait 2
+shot fill-bounds

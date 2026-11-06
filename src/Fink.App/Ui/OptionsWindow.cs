@@ -248,6 +248,8 @@ public sealed partial class FinkGame
         Toggle("view.grid");
         Toggle("view.fullscreen");
 
+        DrawThemeOptions();
+
         ImGui.SeparatorText("Drawing");
         Toggle("layer.autoSelect");
         Toggle("brush.pixelPerfect");
@@ -256,9 +258,15 @@ public sealed partial class FinkGame
         bool penEraser = Ui.PenEraser;
         if (ImGui.Checkbox("Pen eraser end erases", ref penEraser)) Ui.PenEraser = penEraser;
         ImGui.TextDisabled(!PenInput.Hooked ? "  Not listening for pen input (Windows only)."
-            : PenInput.PenSeen ? $"  Pen seen{(PenInput.Eraser ? ": eraser end now" : "")}."
+            : PenInput.PenSeen ? $"  Pen seen{(PenInput.Eraser ? ": eraser end now" : PenInput.Barrel ? ": barrel button held" : "")}."
             : "  No pen seen yet. Touch the screen area with the pen; if it never shows up, turn on Windows Ink in the XP-Pen driver.");
         ImGui.TextDisabled("  Or have the driver send a key for the eraser end and bind it to Eraser (hold) in Hotkeys.");
+        if (PenInput.PenSeen)
+        {
+            ImGui.TextDisabled($"  Pen: {(PenInput.Contact ? "touching" : PenInput.InRange ? "hovering" : "away")}, " +
+                               $"{PenInput.Downs} touch(es). Last press: {(PenInput.LastPress == "" ? "none yet" : PenInput.LastPress)}.");
+            ImGui.TextDisabled("  Hold the barrel button, then touch down: that press is a right-click until the pen lifts.");
+        }
 
         ImGui.SeparatorText("Files");
         ImGui.TextDisabled(_session.Paths.Root);

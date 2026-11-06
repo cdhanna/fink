@@ -68,6 +68,9 @@ public static class ProjectFile
         public List<LayerJson> Layers { get; set; } = new();
         public List<TagJson> Tags { get; set; } = new();
         public List<PointJson> Points { get; set; } = new();
+        public List<int>? OnionPins { get; set; }
+        /// <summary>9-slice insets: left, top, right, bottom. Absent when the asset doesn't stretch.</summary>
+        public int[]? Slice { get; set; }
     }
 
     private sealed class LayerJson
@@ -76,8 +79,15 @@ public static class ProjectFile
         public string Role { get; set; } = "Line";
         public bool Visible { get; set; } = true;
         public bool Locked { get; set; }
+        /// <summary>Editor-only: how see-through the layer is on the canvas. Never exported.</summary>
+        public float ViewOpacity { get; set; } = 1f;
+        public bool OnionOff { get; set; }
+        public int? OnionBefore { get; set; }
+        public int? OnionAfter { get; set; }
         /// <summary>Index of the layer whose timing this one follows.</summary>
         public int? Follows { get; set; }
+        /// <summary>Fill layers: indices of the Line layers fills stop at. Absent: every visible one.</summary>
+        public List<int>? FillBounds { get; set; }
         public List<int> Drawings { get; set; } = new();
         /// <summary>The drawing number shown on each frame (null: nothing). Absent for followers.</summary>
         public List<int?>? Exposures { get; set; }
@@ -135,6 +145,7 @@ public static class ProjectFile
                 Height = doc.Height,
                 Fps = doc.Fps,
                 Frames = doc.Frames.Count,
+                Slice = doc.Slice is { } sl ? new[] { sl.Left, sl.Top, sl.Right, sl.Bottom } : null,
             };
             for (int li = 0; li < doc.Layers.Count; li++)
             {
@@ -146,7 +157,12 @@ public static class ProjectFile
                     Role = layer.Role.ToString(),
                     Visible = layer.Visible,
                     Locked = layer.Locked,
+                    ViewOpacity = layer.ViewOpacity,
+                    OnionOff = layer.OnionOff,
+                    OnionBefore = layer.OnionBefore,
+                    OnionAfter = layer.OnionAfter,
                     Follows = follows,
+                    FillBounds = layer.FillBounds?.Select(l => doc.Layers.IndexOf(l)).Where(i => i >= 0).ToList(),
                     Drawings = layer.Drawings.Select(d => d.Number).ToList(),
                     Exposures = follows != null ? null : doc.Frames.Select(f => doc.ExposureOf(layer, f)?.Number).ToList(),
                     Points = layer.Drawings.Any(d => d.Points.Count > 0)
@@ -174,6 +190,7 @@ public static class ProjectFile
                 var (a, b) = doc.TagRange(tag);
                 if (a >= 0) aj.Tags.Add(new TagJson(tag.Name, a, b, tag.Loop.ToString(), tag.Id));
             }
+            aj.OnionPins = doc.OnionPins.Select(f => doc.Frames.IndexOf(f)).Where(i => i >= 0).ToList();
             aj.Points = doc.Points.Select(p => new PointJson(p.Id, p.Name, p.IsPivot, doc.Layers.IndexOf(p.Layer), p.Keyed, p.Smooth,
                 p.Keyed ? doc.KeysOf(p).Where(kv => doc.Frames.Contains(kv.Key))
                     .ToDictionary(kv => doc.Frames.IndexOf(kv.Key).ToString(), kv => new[] { kv.Value.X, kv.Value.Y }) : null)).ToList();
@@ -218,6 +235,7 @@ public static class ProjectFile
             var doc = new Document(aj.Width, aj.Height, palette)
             {
                 Name = aj.Name, Fps = Math.Clamp(aj.Fps, 1, 120), Id = aj.Id, TimelineTagId = aj.TimelineTagId, Owner = project,
+                Slice = aj.Slice is { Length: 4 } s4 ? new NineSlice(s4[0], s4[1], s4[2], s4[3]).Clamp(aj.Width, aj.Height) : null,
             };
             for (int f = 0; f < Math.Max(1, aj.Frames); f++) doc.Frames.Add(new Frame());
 
@@ -225,6 +243,10 @@ public static class ProjectFile
             {
                 Visible = lj.Visible,
                 Locked = lj.Locked,
+                ViewOpacity = Math.Clamp(lj.ViewOpacity, 0f, 1f),
+                OnionOff = lj.OnionOff,
+                OnionBefore = lj.OnionBefore,
+                OnionAfter = lj.OnionAfter,
             }).ToList();
             doc.Layers.AddRange(layers);
             for (int li = 0; li < layers.Count; li++)
@@ -232,6 +254,8 @@ public static class ProjectFile
                 var lj = aj.Layers[li];
                 var layer = layers[li];
                 if (lj.Follows is { } fi && fi >= 0 && fi < layers.Count && fi != li) layer.Follows = layers[fi];
+                if (lj.FillBounds is { } fb)
+                    layer.FillBounds = fb.Where(i => i >= 0 && i < layers.Count && i != li).Select(i => layers[i]).ToList();
                 foreach (var number in lj.Drawings)
                 {
                     var cel = new Cel(doc.Width, doc.Height);
@@ -268,6 +292,8 @@ public static class ProjectFile
                 doc.Tags.Add(new Tag(tj.Name, doc.Frames[a], doc.Frames[b],
                     Enum.TryParse<LoopMode>(tj.Loop, true, out var loop) ? loop : LoopMode.Forward, tj.Id));
             }
+            foreach (var pin in aj.OnionPins ?? new())
+                if (pin >= 0 && pin < doc.Frames.Count) doc.OnionPins.Add(doc.Frames[pin]);
             foreach (var pt in aj.Points)
             {
                 if (pt.Layer < 0 || pt.Layer >= layers.Count) continue;

@@ -13,9 +13,15 @@ public enum YieldKind
     Wait,
     /// <summary>Capture a screenshot, then continue.</summary>
     Shot,
+    /// <summary>Move or press the mouse over the timeline (window only), then let a frame pass.</summary>
+    Mouse,
 }
 
-public readonly record struct ScriptYield(YieldKind Kind, int Frames = 0, string? ShotName = null, bool CanvasOnly = false);
+/// <param name="MouseAction">down, up or move.</param>
+/// <param name="MouseFrame">1-based frame; whole numbers are the middle of a frame (2.6 is the start of frame 3).</param>
+/// <param name="MouseRow">"tag", "num" (the frame numbers) or a 1-based layer row, top first.</param>
+public readonly record struct ScriptYield(YieldKind Kind, int Frames = 0, string? ShotName = null, bool CanvasOnly = false,
+    string? MouseAction = null, float MouseFrame = 0, string? MouseRow = null);
 
 /// <summary>
 /// Runs a <c>.fink-test</c> automation script against a <see cref="Session"/>: commands, key
@@ -36,6 +42,9 @@ public readonly record struct ScriptYield(YieldKind Kind, int Frames = 0, string
 /// assert frames == 2            ==, != or ~= (contains); see Property for the names
 /// assert pixel Line 3,4 == 1    palette index on a layer of the current frame
 /// wait 2 / shot name [canvas]   window only; ignored headless
+/// mouse down 3 2 / mouse move 5.4 tag / mouse up 5 num    the real mouse over the timeline: frame, then row
+///                               (a layer row from the top, "tag" or "num"); window only
+/// window assert ...             any instruction that should only run in the window (after mouse ones)
 /// </code>
 /// </summary>
 public sealed class ScriptRunner
@@ -49,6 +58,8 @@ public sealed class ScriptRunner
     public List<string> Log { get; } = new();
     public int AssertCount { get; private set; }
     public bool Passed => Failures.Count == 0;
+    /// <summary>Running without a window: mouse and "window" lines are skipped.</summary>
+    public bool Headless { get; private set; }
     public string Name { get; }
 
     public ScriptRunner(Session session, string text, string name = "script")
@@ -90,6 +101,7 @@ public sealed class ScriptRunner
     /// <summary>Runs to the end, ignoring waits and screenshots.</summary>
     public void RunHeadless()
     {
+        Headless = true;
         while (Next().Kind != YieldKind.Done) { }
     }
 
@@ -101,6 +113,16 @@ public sealed class ScriptRunner
 
         switch (t[0].ToLowerInvariant())
         {
+            case "window":
+                return Headless ? null : Execute(t.Skip(1).ToList(), lineNo);
+            case "mouse":
+            {
+                var action = Arg(1).ToLowerInvariant();
+                if (action is not ("down" or "up" or "move")) throw new FormatException("mouse down|up|move <frame> <row|tag|num> | @x,y");
+                // @x,y: a point in the window, in pixels (for panels other than the timeline)
+                if (Arg(2).StartsWith('@')) return new ScriptYield(YieldKind.Mouse, MouseAction: action, MouseRow: Arg(2));
+                return new ScriptYield(YieldKind.Mouse, MouseAction: action, MouseFrame: float.Parse(Arg(2), CultureInfo.InvariantCulture), MouseRow: Arg(3));
+            }
             case "new":
                 ed.NewDocument(int.Parse(Arg(1)), int.Parse(Arg(2)));
                 break;
@@ -186,6 +208,52 @@ public sealed class ScriptRunner
                 int? number = Arg(3) == "-" ? null : int.Parse(Arg(3));
                 int count = t.Count > 4 ? int.Parse(t[4]) : 1;
                 for (int i = first; i < first + count; i++) ed.SetCell(i, layer, number);
+                break;
+            }
+            case "plus":
+                // plus <layer> <frame>: the timeline's "+" on an empty cell (past the end adds frames)
+                ed.NewDrawingAt(FindLayer(Arg(1)), int.Parse(Arg(2)) - 1);
+                break;
+            case "movelayer":
+                // movelayer <layer> <position, 1 = bottom>: dragging a layer in the list
+                ed.MoveLayerTo(FindLayer(Arg(1)), int.Parse(Arg(2)) - 1);
+                break;
+            case "renamelayer":
+                // renamelayer <layer> <new name>
+                ed.RenameLayer(FindLayer(Arg(1)), Arg(2));
+                break;
+            case "fillbounds":
+            {
+                // fillbounds <fill layer> all | none | <line,line...>: which Line layers its fills stop at
+                var fill = FindLayer(Arg(1));
+                var what = Arg(2);
+                ed.SetFillBounds(fill, what.Equals("all", StringComparison.OrdinalIgnoreCase) ? null
+                    : what.Equals("none", StringComparison.OrdinalIgnoreCase) ? Array.Empty<Layer>()
+                    : what.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(FindLayer).ToList());
+                break;
+            }
+            case "viewopacity":
+                // viewopacity <layer> <0-100>: the layer's working opacity on the canvas (never exported)
+                FindLayer(Arg(1)).ViewOpacity = Math.Clamp(int.Parse(Arg(2)), 0, 100) / 100f;
+                break;
+            case "slice":
+                // slice <left> <top> <right> <bottom> | slice off: the asset's 9-slice insets
+                ed.SetSlice(Arg(1).Equals("off", StringComparison.OrdinalIgnoreCase) ? null
+                    : new NineSlice(int.Parse(Arg(1)), int.Parse(Arg(2)), int.Parse(Arg(3)), int.Parse(Arg(4))));
+                break;
+            case "movecells":
+            {
+                // movecells <layer,layer...> <from> <to> <new from> [copy]: dragging a timeline selection
+                var layers = Arg(1).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(FindLayer).ToList();
+                ed.MoveCells(layers, int.Parse(Arg(2)) - 1, int.Parse(Arg(3)) - 1, int.Parse(Arg(4)) - 1,
+                    t.Count > 5 && t[5].Equals("copy", StringComparison.OrdinalIgnoreCase));
+                break;
+            }
+            case "tagrange":
+            {
+                // tagrange <name> <from> <to>: dragging a tag, or its ends
+                var tag = ed.Document.Tags.FirstOrDefault(tg => tg.Name == Arg(1)) ?? throw new InvalidOperationException($"No tag \"{Arg(1)}\"");
+                ed.UpdateTag(tag, from: int.Parse(Arg(2)) - 1, to: int.Parse(Arg(3)) - 1);
                 break;
             }
             case "holdend":
@@ -354,6 +422,28 @@ public sealed class ScriptRunner
                 if (Arg(1).Equals("eraser", StringComparison.OrdinalIgnoreCase)) ed.BeginMomentary(Momentary.Eraser);
                 else ed.EndMomentary(Momentary.Eraser);
                 break;
+            case "onion":
+            {
+                // onion pin <frame> | onion layer <layer> on|off|default|<before> <after> | onion counts <before> <after>
+                switch (Arg(1).ToLowerInvariant())
+                {
+                    case "pin": ed.Document.TogglePin(int.Parse(Arg(2)) - 1); break;
+                    case "counts": ed.Onion.Before = int.Parse(Arg(2)); ed.Onion.After = int.Parse(Arg(3)); break;
+                    case "layer":
+                    {
+                        var l = FindLayer(Arg(2));
+                        switch (Arg(3).ToLowerInvariant())
+                        {
+                            case "off": l.OnionOff = true; break;
+                            case "on": l.OnionOff = false; break;
+                            case "default": l.OnionBefore = l.OnionAfter = null; break;
+                            default: l.OnionBefore = int.Parse(Arg(3)); l.OnionAfter = int.Parse(Arg(4)); break;
+                        }
+                        break;
+                    }
+                }
+                break;
+            }
             case "follow":
                 ed.SetFollows(FindLayer(Arg(1)), Arg(2).Equals("none", StringComparison.OrdinalIgnoreCase) ? null : FindLayer(Arg(2)));
                 break;
@@ -392,12 +482,14 @@ public sealed class ScriptRunner
         switch (what)
         {
             case "size": ts.Size = int.Parse(value); break;
+            case "erasersize": _s.Editor.EraserSettings.Size = int.Parse(value); break;
             case "gap": ts.GapClose = int.Parse(value); break;
             case "pixelperfect": ts.PixelPerfect = On(); break;
             case "squaretip": ts.SquareTip = On(); break;
             case "contiguous": ts.FillContiguous = On(); break;
             case "autolayer": _s.Editor.AutoSelectLayer = On(); break;
             case "fps": _s.Editor.SetFps(int.Parse(value)); break;
+            case "theme": _s.Ui.ThemeName = value; break;
             case "zoom": _s.Editor.View.Zoom = int.Parse(value); _s.Editor.View.FitRequested = false; break;
             default: throw new FormatException($"unknown setting \"{what}\"");
         }
@@ -473,6 +565,19 @@ public sealed class ScriptRunner
         if (lower.StartsWith("binding."))
             return string.Join(", ", _s.Keymap.BindingsOf(name[8..]).Select(b => b.ToString()));
         if (lower.StartsWith("track ")) return Track(FindLayer(name[6..].Trim()));
+        if (lower.StartsWith("fillbounds "))
+        {
+            var fill = FindLayer(name[11..].Trim());
+            return fill.FillBounds == null ? "all" : string.Join(", ", ed.Document.FillBoundaryLayers(fill).Select(l => l.Name));
+        }
+        if (lower.StartsWith("ghosts "))
+        {
+            // which frames the layer's onion shows here: b3 a5 p9 (before, after, pinned; 1-based)
+            var gl = FindLayer(name[7..].Trim());
+            var listed = string.Join(" ", Onion.Plan(ed.Document, gl, ed.FrameIndex, ed.Onion)
+                .OrderBy(g => g.Frame).Select(g => $"{"bap"[(int)g.Kind]}{g.Frame + 1}"));
+            return listed.Length == 0 ? "none" : listed;
+        }
         if (lower.StartsWith("point "))
         {
             var pn = name[6..].Trim();
@@ -498,6 +603,7 @@ public sealed class ScriptRunner
         {
             "frames" => ed.Document.Frames.Count.ToString(),
             "fps" => ed.Document.Fps.ToString(),
+            "theme" => ui.ThemeName,
             "channel" => ed.ActiveChannel?.Name ?? "color",
             "channels" => string.Join(", ", ed.Project.Channels.Select(c => c.Name)),
             "points" => string.Join(", ", ed.Document.Points.Select(p => p.Name)),
@@ -517,15 +623,19 @@ public sealed class ScriptRunner
             "drawing" => ed.CurrentDrawing?.Number.ToString() ?? "-",
             "drawings" => ed.CurrentLayer.Drawings.Count.ToString(),
             "layers" => ed.Document.Layers.Count.ToString(),
+            "layerorder" => string.Join(", ", ed.Document.Layers.AsEnumerable().Reverse().Select(l => l.Name)), // top first, as shown
             "frame" => (ed.FrameIndex + 1).ToString(),
             "layer" => ed.CurrentLayer.Name,
             "layerrole" => ed.CurrentLayer.Role.ToString(),
+            "viewopacity" => ((int)MathF.Round(ed.CurrentLayer.ViewOpacity * 100)).ToString(),
             "tool" => ed.Tool.Name,
             "effectivetool" => ed.EffectiveToolName,
             "momentary" => ed.Momentary.ToString(),
             "color" => ed.Primary.ToString(),
             "color2" => ed.Secondary.ToString(),
             "size" => ed.ToolSettings.Size.ToString(),
+            "erasersize" => ed.EraserSettings.Size.ToString(),
+            "brushsize" => ed.Brush.Size.ToString(),
             "history" => ed.History.Position.ToString(),
             "historycount" => ed.History.Entries.Count.ToString(),
             "steps" => string.Join(" | ", ed.History.Line().Skip(1).Take(ed.History.Position).Select(n => n.Name)),
@@ -533,6 +643,7 @@ public sealed class ScriptRunner
             "zoom" => ed.View.Zoom.ToString(),
             "pan" => $"{ed.View.Pan.X.ToString(CultureInfo.InvariantCulture)},{ed.View.Pan.Y.ToString(CultureInfo.InvariantCulture)}",
             "onion" => ed.Onion.Enabled.ToString(),
+            "slice" => ed.Document.Slice?.ToString() ?? "off",
             "playing" => ed.Playing.ToString(),
             "focus" => ui.FocusMode.ToString(),
             "fullscreen" => ui.Fullscreen.ToString(),

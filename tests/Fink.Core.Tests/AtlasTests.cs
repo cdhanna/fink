@@ -54,6 +54,22 @@ public class AtlasTests
     }
 
     [Fact]
+    public void Nine_slice_insets_go_in_the_manifest_and_the_file()
+    {
+        var p = Sample();
+        var hero = p.Assets[0];
+        DocumentOps.SetSlice(hero, new History(), new NineSlice(2, 3, 4, 5));
+        var m = AtlasExport.Manifest(AtlasBuilder.Build(p, p.Atlases[0]), p.Palette);
+        Assert.Equal(new[] { 2, 3, 4, 5 }, m.Assets.Single(a => a.Id == hero.Id).Slice);
+        Assert.Null(m.Assets.Single(a => a.Id == p.Assets[1].Id).Slice);
+
+        using var ms = new MemoryStream();
+        ProjectFile.Write(p, ms);
+        ms.Position = 0;
+        Assert.Equal(new NineSlice(2, 3, 4, 5), ProjectFile.Read(ms).Assets[0].Slice);
+    }
+
+    [Fact]
     public void Clips_have_offsets_times_and_stable_ids()
     {
         var p = Sample();
@@ -100,6 +116,32 @@ public class AtlasTests
 
         var tight = AtlasBuilder.Build(p, config, tight: true);
         Assert.True(tight.Width * tight.Height <= second.Width * second.Height);
+    }
+
+    [Fact]
+    public void Changing_settings_and_back_gives_the_same_atlas()
+    {
+        var p = Sample();
+        var config = p.Atlases[0];
+        string Layout(AtlasBuild b) => $"{b.Width}x{b.Height} " + string.Join(" ", b.Cells.OrderBy(c => c.Key).Select(c => $"{c.X},{c.Y}"));
+        var start = Layout(AtlasBuilder.Build(p, config));
+
+        config.PowerOfTwo = false;
+        var npot = AtlasBuilder.Build(p, config);
+        Assert.Equal(Layout(AtlasBuilder.Build(p, config, tight: true)), Layout(npot)); // a fresh pack, not the old places
+        config.PowerOfTwo = true;
+        Assert.Equal(start, Layout(AtlasBuilder.Build(p, config)));
+
+        config.Padding = 4;
+        Assert.NotEqual(start, Layout(AtlasBuilder.Build(p, config)));
+        config.Padding = 1;
+        Assert.Equal(start, Layout(AtlasBuilder.Build(p, config)));
+
+        config.IncludeAll = false;
+        config.AssetIds.Add(p.Assets[0].Id);
+        AtlasBuilder.Build(p, config);
+        config.AssetIds.Add(p.Assets[1].Id);
+        Assert.Equal(start, Layout(AtlasBuilder.Build(p, config)));
     }
 
     [Fact]

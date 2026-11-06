@@ -52,7 +52,7 @@ public sealed partial class FinkGame
         var origin = ImGui.GetCursorScreenPos();
         var dl = ImGui.GetWindowDrawList();
         var accent = ImGui.GetColorU32(ImGuiCol.CheckMark);
-        uint ahead = 0xB0C0C0C0u, other = 0x60909090u;
+        uint ahead = Faint(0xB0), other = WithAlpha(ImGui.GetColorU32(ImGuiCol.TextDisabled), 0x70);
         Num.Vector2 Dot(HistoryNode n) => origin + new Num.Vector2(8 * sc + Math.Min(lane[n], 11) * laneW, row[n] * rowH + rowH / 2);
 
         HistoryNode? clicked = null;
@@ -93,14 +93,14 @@ public sealed partial class FinkGame
 
             if (here) dl.AddCircleFilled(p, 5 * sc, accent);
             else dl.AddCircleFilled(p, 3.5f * sc, col);
-            if (n.Label != null) dl.AddCircle(p, 7 * sc, 0xFF40D0FFu, 12, 1.5f * sc);
+            if (n.Label != null) dl.AddCircle(p, 7 * sc, Colors.Accent, 12, 1.5f * sc);
 
             var text = n.Name + (n.Tag is Document doc && Ed.Project.Assets.Count > 1 ? $"   {doc.Name}" : "");
             var tc = path.Contains(n) ? ImGui.GetColorU32(ImGuiCol.Text) : line.Contains(n) ? ahead : other;
             var tp = new Num.Vector2(origin.X + graphW, origin.Y + i * rowH + (rowH - ImGui.GetTextLineHeight()) / 2 - 1);
             if (n.Label != null)
             {
-                dl.AddText(tp, 0xFF40D0FFu, n.Label);
+                dl.AddText(tp, Colors.Accent, n.Label);
                 tp.X += ImGui.CalcTextSize(n.Label).X + 8 * sc;
             }
             dl.AddText(tp, tc, text);

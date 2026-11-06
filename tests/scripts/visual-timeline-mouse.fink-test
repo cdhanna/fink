@@ -1,0 +1,73 @@
+# Timeline gestures with the real (scripted) mouse. Headless only the setup runs;
+# the "window" checks run with: Fink.exe --script tests/scripts/visual-timeline-mouse.fink-test --out <dir>
+new 32 32
+wait 6
+cmd workspace.animate
+wait 6
+follow Fill none
+plus Line 1
+plus Fill 1
+plus Line 2
+plus Line 3
+plus Line 4
+assert track Line == 1 2 3 4
+assert track Fill == 1 1 1 1
+tag walk 1 2
+wait 2
+
+# press a block, go down a row before sideways: a selection across layers, not a block move
+mouse down 1 1
+mouse move 1 2
+mouse move 2 2
+mouse up 2 2
+wait 2
+shot timeline-selected
+# drag the selection two frames right
+mouse down 1 1
+mouse move 2 1
+mouse move 3 1
+wait 1
+shot timeline-moving
+mouse up 3 1
+wait 2
+window assert track Line == - - 1 2
+window assert track Fill == - - 1 1
+window cmd edit.undo
+window assert track Line == 1 2 3 4
+
+# a tag: slide it by its middle, stretch it by its end (past the last frame adds frames)
+mouse down 1 tag
+mouse move 2 tag
+mouse move 3 tag
+mouse up 3 tag
+wait 2
+window assert tags == walk:3-4:Forward
+mouse down 4.4 tag
+mouse move 5 tag
+mouse move 6 tag
+mouse up 6 tag
+wait 2
+window assert tags == walk:3-6:Forward
+window assert frames == 6
+
+# double-tap the frame numbers: onion skin off, and on again
+window assert onion == True
+mouse down 2 num
+mouse up 2 num
+mouse down 2 num
+mouse up 2 num
+wait 2
+window assert onion == False
+mouse down 2 1
+mouse up 2 1
+mouse down 2 1
+mouse up 2 1
+wait 2
+window assert onion == True
+
+# the "+" past the end acts on release
+mouse down 8 1
+mouse up 8 1
+wait 2
+window assert frames == 8
+shot timeline-after

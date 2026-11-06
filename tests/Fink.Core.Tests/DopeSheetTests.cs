@@ -220,6 +220,35 @@ public class DopeSheetTests
     }
 
     [Fact]
+    public void View_opacity_shows_on_the_canvas_only_and_is_saved()
+    {
+        var (doc, _, line, history) = NewDoc();
+        Dot(doc, history, line, 0, 1, 2, 2);
+        line.ViewOpacity = 0.5f;
+        var dest = new uint[doc.Width * doc.Height];
+        uint full = doc.Palette[1].Packed;
+
+        // anything that isn't the canvas (thumbnails, export, atlases) sees the layer as drawn
+        Compositor.Render(doc, 0, dest, null, checker: false);
+        Assert.Equal(full, dest[2 * doc.Width + 2]);
+        // the canvas blends it over what's under it (here, nothing: black)
+        Compositor.Render(doc, 0, dest, null, checker: false, viewOpacity: true);
+        Assert.NotEqual(full, dest[2 * doc.Width + 2]);
+        line.ViewOpacity = 0f;
+        Compositor.Render(doc, 0, dest, null, checker: false, viewOpacity: true);
+        Assert.Equal(0xFF000000u, dest[2 * doc.Width + 2] | 0xFF000000u);
+
+        line.ViewOpacity = 0.3f;
+        var project = new Project(doc.Palette);
+        project.Assets.Add(doc);
+        using var ms = new MemoryStream();
+        ProjectFile.Write(project, ms);
+        ms.Position = 0;
+        var back = ProjectFile.Read(ms).Assets[0];
+        Assert.Equal(0.3f, back.Layers.Single(l => l.Name == line.Name).ViewOpacity, 3);
+    }
+
+    [Fact]
     public void Blocks_move_resize_from_either_end_and_copy()
     {
         var (doc, _, line, history) = NewDoc();

@@ -76,6 +76,15 @@ public static class DocumentOps
         Change(doc, history, "Move frame", () => Move(doc.Frames, from, to));
     }
 
+    /// <summary>Sets (or, with null, removes) the asset's 9-slice insets. Kept inside the canvas.</summary>
+    public static bool SetSlice(Document doc, History history, NineSlice? slice)
+    {
+        slice = slice?.Clamp(doc.Width, doc.Height);
+        if (slice == doc.Slice) return false;
+        Change(doc, history, slice == null ? "Remove 9-slice" : doc.Slice == null ? "Add 9-slice" : $"9-slice {slice}", () => doc.Slice = slice);
+        return true;
+    }
+
     public static void SetFps(Document doc, History history, int fps)
     {
         fps = Math.Clamp(fps, 1, 120);
@@ -99,6 +108,31 @@ public static class DocumentOps
         {
             var d = MakeDrawing(doc, timing, duplicate ? frame : null);
             for (int i = index; i <= end; i++) doc.SetExposure(timing, doc.Frames[i], d);
+        });
+        return true;
+    }
+
+    /// <summary>
+    /// A new blank drawing on one empty cell (the timeline's "+"). Past the last frame, frames are
+    /// added up to it first, every layer holding what it showed at the end. Returns false when
+    /// the cell already shows something.
+    /// </summary>
+    public static bool NewDrawingAt(Document doc, History history, Layer layer, int index)
+    {
+        if (index < 0) return false;
+        var timing = doc.TimingLayer(layer);
+        if (index < doc.Frames.Count && doc.ExposureOf(timing, doc.Frames[index]) != null) return false;
+        Change(doc, history, index >= doc.Frames.Count ? "New frame" : "New drawing", () =>
+        {
+            while (doc.Frames.Count <= index)
+            {
+                var prev = doc.Frames[^1];
+                var frame = new Frame();
+                doc.Frames.Add(frame);
+                foreach (var l in doc.Layers.Where(l => !doc.IsFollower(l)))
+                    doc.SetExposure(l, frame, doc.ExposureOf(l, prev));
+            }
+            doc.SetExposure(timing, doc.Frames[index], MakeDrawing(doc, timing, null));
         });
         return true;
     }
@@ -157,6 +191,47 @@ public static class DocumentOps
             for (int i = newFrom; i <= newTo; i++) doc.SetExposure(timing, doc.Frames[i], d);
         });
         return true;
+    }
+
+    /// <summary>
+    /// Moves (or copies) a rectangle of cells, frames <paramref name="from"/>..<paramref name="to"/>
+    /// on several layers, so it starts at <paramref name="newFrom"/> (a timeline selection dragged
+    /// sideways). The block goes as it is, empty cells included: what it lands on is replaced, what
+    /// it leaves is emptied. Followers move with their timing layer. Past the last frame, frames
+    /// are added, where the other layers hold.
+    /// </summary>
+    public static bool MoveCells(Document doc, History history, IEnumerable<Layer> layers, int from, int to, int newFrom, bool copy)
+    {
+        var timings = layers.Where(doc.Layers.Contains).Select(doc.TimingLayer).Distinct().ToList();
+        if (timings.Count == 0 || from < 0 || to >= doc.Frames.Count || from > to) return false;
+        newFrom = Math.Max(0, newFrom);
+        if (newFrom == from && !copy) return false;
+        int len = to - from + 1;
+        string what = len == 1 ? "1 frame" : $"{len} frames";
+        Change(doc, history, copy ? $"Copy {what}" : $"Move {what}", () =>
+        {
+            var grabbed = timings.ToDictionary(l => l, l => Enumerable.Range(from, len).Select(i => doc.ExposureOf(l, doc.Frames[i])).ToList());
+            GrowTo(doc, newFrom + len - 1, keep: timings);
+            if (!copy)
+                foreach (var l in timings)
+                    for (int i = from; i <= to; i++) doc.SetExposure(l, doc.Frames[i], null);
+            foreach (var l in timings)
+                for (int k = 0; k < len; k++) doc.SetExposure(l, doc.Frames[newFrom + k], grabbed[l][k]);
+        });
+        return true;
+    }
+
+    /// <summary>Adds frames until <paramref name="last"/> exists; own-timing layers (but <paramref name="keep"/>) hold their last cell.</summary>
+    private static void GrowTo(Document doc, int last, IReadOnlyCollection<Layer>? keep = null)
+    {
+        while (doc.Frames.Count <= last)
+        {
+            var prev = doc.Frames[^1];
+            var frame = new Frame();
+            doc.Frames.Add(frame);
+            foreach (var l in doc.Layers.Where(l => !doc.IsFollower(l) && (keep == null || !keep.Contains(l))))
+                doc.SetExposure(l, frame, doc.ExposureOf(l, prev));
+        }
     }
 
     /// <summary>
@@ -228,20 +303,34 @@ public static class DocumentOps
         return tag;
     }
 
-    /// <summary>Renames, re-ranges or changes the loop of a tag. Returns the new tag.</summary>
+    /// <summary>
+    /// Renames, re-ranges (moves, stretches) or changes the loop of a tag. Returns the new tag.
+    /// Stretching it past the last frame adds frames, where every layer holds.
+    /// </summary>
     public static Tag UpdateTag(Document doc, History history, Tag tag, string? name = null, int? from = null, int? to = null, LoopMode? loop = null)
     {
         int i = doc.Tags.IndexOf(tag);
         if (i < 0) return tag;
         var (a, b) = doc.TagRange(tag);
-        int na = Math.Clamp(from ?? a, 0, doc.Frames.Count - 1), nb = Math.Clamp(to ?? b, 0, doc.Frames.Count - 1);
+        int na = Math.Max(0, from ?? a), nb = Math.Max(0, to ?? b);
         if (na > nb) (na, nb) = (nb, na);
-        var updated = tag with { Name = name ?? tag.Name, From = doc.Frames[na], To = doc.Frames[nb], Loop = loop ?? tag.Loop };
-        if (updated == tag) return tag;
+        na = Math.Min(na, doc.Frames.Count - 1);
+        bool grows = nb >= doc.Frames.Count;
+        if (!grows)
+        {
+            var same = tag with { Name = name ?? tag.Name, From = doc.Frames[na], To = doc.Frames[nb], Loop = loop ?? tag.Loop };
+            if (same == tag) return tag;
+        }
         string what = name != null && name != tag.Name ? $"Rename tag \"{tag.Name}\" to \"{name}\""
             : loop != null && loop != tag.Loop ? $"Tag \"{tag.Name}\": {loop}"
             : $"Tag \"{tag.Name}\" frames {na + 1}-{nb + 1}";
-        Change(doc, history, what, () => doc.Tags[i] = updated);
+        Tag updated = tag;
+        Change(doc, history, what, () =>
+        {
+            GrowTo(doc, nb);
+            updated = tag with { Name = name ?? tag.Name, From = doc.Frames[na], To = doc.Frames[nb], Loop = loop ?? tag.Loop };
+            doc.Tags[i] = updated;
+        });
         return updated;
     }
 
@@ -354,6 +443,38 @@ public static class DocumentOps
             foreach (var f in doc.FollowersOf(layer).ToList()) Unfollow(doc, f);
             doc.Layers.RemoveAt(index);
         });
+    }
+
+    /// <summary>
+    /// Which Line layers a Fill layer's fills stop at (null: every visible one, the default).
+    /// Only Line layers of this document are kept.
+    /// </summary>
+    public static void SetFillBounds(Document doc, History history, Layer fill, IEnumerable<Layer>? lines)
+    {
+        var list = lines?.Where(l => l.Role == LayerRole.Line && doc.Layers.Contains(l)).Distinct().ToList();
+        bool same = list == null ? fill.FillBounds == null
+            : fill.FillBounds != null && fill.FillBounds.Count == list.Count && list.All(fill.FillBounds.Contains);
+        if (same) return;
+        string what = list == null ? "every visible line layer" : list.Count == 0 ? "nothing" : string.Join(", ", list.Select(l => l.Name));
+        Change(doc, history, $"{fill.Name} fills stop at {what}", () => fill.FillBounds = list);
+    }
+
+    /// <summary>
+    /// Renames a layer. Names must be unique in the asset (ignoring case): paste and scripts find
+    /// layers by name. Returns why it can't, or null when done (or nothing changed).
+    /// </summary>
+    public static string? RenameLayer(Document doc, History history, Layer layer, string name)
+    {
+        name = name.Trim();
+        if (name.Length == 0) return "A layer needs a name.";
+        if (name == layer.Name) return null;
+        if (doc.Layers.Any(l => l != layer && l.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            return $"There's already a layer called \"{name}\".";
+        var old = layer.Name;
+        var edit = new ActionEdit($"Rename layer \"{old}\" to \"{name}\"",redo: () => layer.Name = name, undo: () => layer.Name = old);
+        edit.Redo();
+        history.Push(edit);
+        return null;
     }
 
     public static void MoveLayer(Document doc, History history, int from, int to)

@@ -74,6 +74,7 @@ public sealed class ProjectState
             restored[i].Placements = match.Placements;
             restored[i].LastWidth = match.LastWidth;
             restored[i].LastHeight = match.LastHeight;
+            restored[i].PackedWith = match.PackedWith;
         }
         p.Atlases.Clear();
         p.Atlases.AddRange(restored);

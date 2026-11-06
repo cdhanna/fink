@@ -1,0 +1,73 @@
+# The timeline's "+" on empty cells, and dragging layers to reorder them.
+new 16 16
+hover canvas
+tool Pencil
+layer Line
+color 1
+stroke 1,1
+assert track Line == 1
+assert frames == 1
+
+# "+" just past the end: a new frame with a new drawing on that layer
+plus Line 2
+assert frames == 2
+assert frame == 2
+assert track Line == 1 2
+
+# further past the end: the frames between hold, the clicked cell gets the new drawing
+plus Line 5
+assert frames == 5
+assert track Line == 1 2 2 2 3
+
+# "+" on an empty cell inside the timeline: just a new drawing there
+expose Line 3 - 1
+assert track Line == 1 2 - 2 3
+plus Line 3
+assert track Line == 1 2 4 2 3
+# a cell that shows something has no "+"
+plus Line 3
+assert track Line == 1 2 4 2 3
+cmd edit.undo
+assert track Line == 1 2 - 2 3
+
+# reordering layers (1 = bottom of the stack)
+assert layerorder == Line, Fill
+movelayer Line 1
+assert layerorder == Fill, Line
+assert layer == Line
+cmd edit.undo
+assert layerorder == Line, Fill
+
+# a rectangle of cells across layers, dragged sideways (the block goes as it is, empties too)
+new 16 16
+follow Fill none
+plus Line 1
+plus Fill 1
+plus Line 2
+plus Line 3
+assert track Line == 1 2 3
+assert track Fill == 1 1 1
+movecells Line,Fill 1 2 3
+assert frames == 4
+assert frame == 3
+assert track Line == - - 1 2
+assert track Fill == - - 1 1
+cmd edit.undo
+assert track Line == 1 2 3
+assert track Fill == 1 1 1
+# Ctrl-drag copies; other layers keep theirs
+movecells Line 1 1 3 copy
+assert track Line == 1 2 1
+assert track Fill == 1 1 1
+
+# tags slide, and stretch (past the end adds frames, everything holds)
+tag walk 1 2
+tagrange walk 2 3
+assert tags == walk:2-3:Forward
+tagrange walk 2 5
+assert tags == walk:2-5:Forward
+assert frames == 5
+assert track Line == 1 2 1 1 1
+cmd edit.undo
+assert frames == 3
+assert tags == walk:2-3:Forward

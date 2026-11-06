@@ -30,7 +30,8 @@ public sealed record FinkAtlasManifest
 }
 
 public sealed record ManifestCell(int X, int Y, int W, int H);
-public sealed record ManifestAsset(int Id, string Name, int Width, int Height, int Fps, List<ManifestPoint> Points);
+/// <param name="Slice">9-slice insets (left, top, right, bottom) when the asset stretches; null otherwise.</param>
+public sealed record ManifestAsset(int Id, string Name, int Width, int Height, int Fps, List<ManifestPoint> Points, int[]? Slice = null);
 /// <param name="Id">The POINT_ constant's value.</param>
 public sealed record ManifestPoint(int Id, string Name);
 /// <param name="R">What's in red: a Value channel's name, a Normal channel's name.x/.y/.z, a number, or empty (0).</param>
@@ -73,7 +74,8 @@ public static class AtlasExport
             Maps = build.Config.Maps.Select(m => new ManifestMap(m.Name, $"{name}.{m.Name}.png", m.R, m.G, m.B, m.A)).ToList(),
             Cells = build.Cells.Select(c => new ManifestCell(c.X, c.Y, c.W, c.H)).ToList(),
             Assets = build.Assets.Select(a => new ManifestAsset(a.Id, a.Name, a.Width, a.Height, a.Fps,
-                a.Points.Where(p => !p.IsPivot).Select(p => new ManifestPoint(p.Id, p.Name)).ToList())).ToList(),
+                a.Points.Where(p => !p.IsPivot).Select(p => new ManifestPoint(p.Id, p.Name)).ToList(),
+                a.Slice is { } sl ? new[] { sl.Left, sl.Top, sl.Right, sl.Bottom } : null)).ToList(),
             Clips = build.Clips.Select(c => new ManifestClip(c.Id, c.Asset.Id, c.Name, LoopName(c.Loop),
                 c.Frames.Select(f => new ManifestFrame(f.Cell, f.OffsetX, f.OffsetY, f.Ms, f.Pivot.X, f.Pivot.Y,
                     (f.Points ?? Array.Empty<PointXY>()).SelectMany(p => new[] { p.X, p.Y }).ToArray())).ToList())).ToList(),
@@ -167,13 +169,25 @@ public static class AtlasExport
         return px;
     }
 
-    /// <summary>Writes everything. Returns the files written.</summary>
-    public static List<string> Write(Project project, AtlasBuild build)
+    /// <summary>
+    /// A folder as written in an atlas's settings, made absolute: a relative one is relative to the
+    /// project file's folder (so a project and its game can move together), and needs one.
+    /// </summary>
+    public static string ResolveFolder(string folder, string? projectDir)
+    {
+        if (Path.IsPathRooted(folder)) return Path.GetFullPath(folder);
+        if (projectDir == null)
+            throw new InvalidOperationException($"\"{folder}\" is relative to the project file: save the project first, or use a full path.");
+        return Path.GetFullPath(Path.Combine(projectDir, folder));
+    }
+
+    /// <summary>Writes everything. Returns the files written. Relative folders are relative to <paramref name="projectDir"/>.</summary>
+    public static List<string> Write(Project project, AtlasBuild build, string? projectDir = null)
     {
         var config = build.Config;
         if (build.Error != null) throw new InvalidOperationException(build.Error);
         if (string.IsNullOrWhiteSpace(config.OutputFolder)) throw new InvalidOperationException($"Atlas \"{config.Name}\" has no output folder.");
-        var dir = Path.GetFullPath(config.OutputFolder);
+        var dir = ResolveFolder(config.OutputFolder, projectDir);
         Directory.CreateDirectory(dir);
         var manifest = Manifest(build, project.Palette);
         var code = FadeBasicBindings.Generate(project, build, manifest);   // first: it can refuse (name clashes)
@@ -186,7 +200,7 @@ public static class AtlasExport
             Put(Path.Combine(dir, $"{config.Name}.{map.Name}.png"), Png.Encode(MapPixels(project, build, map), build.Width, build.Height));
         Put(Path.Combine(dir, $"{config.Name}.atlas.json"), Encoding.UTF8.GetBytes(JsonSerializer.Serialize(manifest, Json)));
         Put(Path.Combine(dir, FadeBasicBindings.ShaderFileName(config)), Encoding.UTF8.GetBytes(FadeBasicBindings.PaletteShader(config)));
-        var codeDir = string.IsNullOrWhiteSpace(config.CodeFolder) ? dir : Path.GetFullPath(config.CodeFolder);
+        var codeDir = string.IsNullOrWhiteSpace(config.CodeFolder) ? dir : ResolveFolder(config.CodeFolder, projectDir);
         Directory.CreateDirectory(codeDir);
         Put(Path.Combine(codeDir, FadeBasicBindings.FileName(config)), Encoding.UTF8.GetBytes(code));
         return files;

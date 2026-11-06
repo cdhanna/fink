@@ -68,7 +68,7 @@ public sealed partial class FinkGame : Game
     protected override unsafe void Initialize()
     {
         base.Initialize();
-        _imgui = new ImGuiRenderer(this);
+        _imgui = new PenAwareImGuiRenderer(this);
 
         // ImGui's layout file lives with the other settings, not next to the exe
         Directory.CreateDirectory(_session.Paths.Root);
@@ -80,6 +80,8 @@ public sealed partial class FinkGame : Game
         if (_options.OpenPath != null) OpenFile(_options.OpenPath);
         else if (_script == null && _session.Leftovers.Count > 0) Ui.ShowRecovery = true;
 
+        _theme = FindTheme(Ui.ThemeName); // before the first frame, so it doesn't flash the default
+        _appliedTheme = Ui.ThemeName;
         ApplyUiScale();
     }
 
@@ -94,6 +96,7 @@ public sealed partial class FinkGame : Game
             _graphics.ApplyChanges();
         }
         UpdateProject();
+        UpdateTheme();
         UpdatePen();
         base.Update(gameTime);
     }
@@ -109,7 +112,7 @@ public sealed partial class FinkGame : Game
         RenderShaderPreview();
         UpdateAtlasPreview();
 
-        GraphicsDevice.Clear(new Color(24, 22, 28));
+        GraphicsDevice.Clear(new Color(Colors.Background));
 
         _imgui.BeforeLayout(gameTime);
         PollHotkeys();
@@ -141,7 +144,8 @@ public sealed partial class FinkGame : Game
         }
         // Recomposited every frame: strokes change pixels before they reach the history, and a
         // few hundred thousand pixels is cheap. Dirty-tile updates can come later.
-        Compositor.Render(doc, Ed.FrameIndex, _canvasPixels, Ed.Playing ? null : Ed.Onion, overlays: Ed.Selection.Overlays(), colors: Ed.ViewColors);
+        Compositor.Render(doc, Ed.FrameIndex, _canvasPixels, Ed.Playing ? null : Ed.Onion, overlays: Ed.Selection.Overlays(), colors: Ed.ViewColors,
+            checkerLight: Colors.CheckerLight, checkerDark: Colors.CheckerDark, viewOpacity: true);
         if (Ed.ActiveChannel is { } channel) ChannelView.Overlay(doc, Ed.FrameIndex, channel, _canvasPixels);
         _canvasTexture.SetData(_canvasPixels);
     }
@@ -188,6 +192,28 @@ public sealed partial class FinkGame : Game
         {
             case YieldKind.Wait:
                 _scriptWait = y.Frames;
+                break;
+            case YieldKind.Mouse:
+                if (_imgui is PenAwareImGuiRenderer pa && y.MouseRow is { } at && at.StartsWith('@'))
+                {
+                    var xy = at[1..].Split(',');
+                    bool held = y.MouseAction == "down" || (y.MouseAction == "move" && pa.ScriptMouse is { Left: true });
+                    pa.ScriptMouse = (new System.Numerics.Vector2(float.Parse(xy[0], System.Globalization.CultureInfo.InvariantCulture),
+                        float.Parse(xy[1], System.Globalization.CultureInfo.InvariantCulture)), held);
+                }
+                else if (_imgui is PenAwareImGuiRenderer pr && _sheet is { } g)
+                {
+                    float x = g.P0.X + (y.MouseFrame - 0.5f) * g.CellW;
+                    float yy = g.P0.Y + (y.MouseRow?.ToLowerInvariant() switch
+                    {
+                        "tag" => g.TagH / 2,
+                        "num" => g.TagH + g.NumH / 2,
+                        var r => g.TagH + g.NumH + (int.Parse(r!) - 0.5f) * g.RowH,
+                    });
+                    bool down = y.MouseAction == "down" || (y.MouseAction == "move" && pr.ScriptMouse is { Left: true });
+                    pr.ScriptMouse = (new System.Numerics.Vector2(x, yy), down);
+                }
+                _scriptWait = 1;
                 break;
             case YieldKind.Shot:
                 _shotName = y.ShotName;

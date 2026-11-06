@@ -194,7 +194,7 @@ public sealed partial class FinkGame
         else io.Fonts.AddFontDefault();
         _imgui.RebuildFontAtlas();
 
-        ImGui.StyleColorsDark();
+        ApplyThemeStyle(scale);
         var s = ImGui.GetStyle();
         s.WindowPadding = new Vector2(8, 8) * scale;
         s.FramePadding = new Vector2(6, 4) * scale;
@@ -205,40 +205,6 @@ public sealed partial class FinkGame
         s.ScrollbarSize = 14 * scale;
         s.GrabMinSize = 10 * scale;
         s.TabBarBorderSize = 1;
-        s.WindowRounding = 4 * scale;
-        s.ChildRounding = 4 * scale;
-        s.FrameRounding = 3 * scale;
-        s.PopupRounding = 4 * scale;
-        s.ScrollbarRounding = 6 * scale;
-        s.GrabRounding = 3 * scale;
-        s.TabRounding = 4 * scale;
         s.WindowMenuButtonPosition = ImGuiDir.None;
-
-        var c = s.Colors;
-        c[(int)ImGuiCol.WindowBg] = new Vector4(0.13f, 0.12f, 0.15f, 1f);
-        c[(int)ImGuiCol.ChildBg] = new Vector4(0.11f, 0.10f, 0.13f, 1f);
-        c[(int)ImGuiCol.PopupBg] = new Vector4(0.15f, 0.14f, 0.18f, 0.98f);
-        c[(int)ImGuiCol.TitleBg] = new Vector4(0.10f, 0.09f, 0.12f, 1f);
-        c[(int)ImGuiCol.TitleBgActive] = new Vector4(0.16f, 0.14f, 0.21f, 1f);
-        c[(int)ImGuiCol.MenuBarBg] = new Vector4(0.10f, 0.09f, 0.12f, 1f);
-        c[(int)ImGuiCol.Header] = new Vector4(0.33f, 0.27f, 0.50f, 0.55f);
-        c[(int)ImGuiCol.HeaderHovered] = new Vector4(0.40f, 0.33f, 0.62f, 0.80f);
-        c[(int)ImGuiCol.HeaderActive] = new Vector4(0.45f, 0.37f, 0.70f, 1f);
-        c[(int)ImGuiCol.Button] = new Vector4(0.24f, 0.22f, 0.30f, 1f);
-        c[(int)ImGuiCol.ButtonHovered] = new Vector4(0.36f, 0.30f, 0.52f, 1f);
-        c[(int)ImGuiCol.ButtonActive] = new Vector4(0.46f, 0.37f, 0.72f, 1f);
-        c[(int)ImGuiCol.FrameBg] = new Vector4(0.19f, 0.18f, 0.24f, 1f);
-        c[(int)ImGuiCol.FrameBgHovered] = new Vector4(0.25f, 0.23f, 0.32f, 1f);
-        c[(int)ImGuiCol.FrameBgActive] = new Vector4(0.30f, 0.27f, 0.40f, 1f);
-        c[(int)ImGuiCol.Tab] = new Vector4(0.16f, 0.14f, 0.20f, 1f);
-        c[(int)ImGuiCol.TabHovered] = new Vector4(0.40f, 0.33f, 0.62f, 1f);
-        c[(int)ImGuiCol.TabSelected] = new Vector4(0.30f, 0.25f, 0.45f, 1f);
-        c[(int)ImGuiCol.TabDimmed] = new Vector4(0.13f, 0.12f, 0.16f, 1f);
-        c[(int)ImGuiCol.TabDimmedSelected] = new Vector4(0.22f, 0.19f, 0.30f, 1f);
-        c[(int)ImGuiCol.SliderGrab] = new Vector4(0.55f, 0.45f, 0.85f, 1f);
-        c[(int)ImGuiCol.SliderGrabActive] = new Vector4(0.65f, 0.55f, 0.95f, 1f);
-        c[(int)ImGuiCol.CheckMark] = new Vector4(0.70f, 0.60f, 1.00f, 1f);
-        c[(int)ImGuiCol.DockingPreview] = new Vector4(0.55f, 0.45f, 0.85f, 0.6f);
-        c[(int)ImGuiCol.Separator] = new Vector4(0.28f, 0.26f, 0.34f, 1f);
     }
 }

@@ -1,0 +1,28 @@
+# Clicking the Fill boundaries matrix in the Layers panel (this crashed once: a style push
+# without its pop when a dimmed cell was clicked). Window positions are for the Draw workspace.
+new 16 16
+wait 6
+assert fillbounds Fill == all
+# the Layers tab
+mouse move @1361,38
+wait 2
+mouse down @1361,38
+mouse up @1361,38
+wait 10
+shot fill-matrix-before
+# the dimmed Line cell (Fill follows every visible line layer): untick it
+mouse move @1467,284
+wait 2
+mouse down @1467,284
+mouse up @1467,284
+wait 3
+window assert fillbounds Fill != all
+shot fill-matrix-picked
+# "Visible" again: back to the default
+mouse move @1417,284
+wait 2
+mouse down @1417,284
+mouse up @1417,284
+wait 3
+window assert fillbounds Fill == all
+shot fill-matrix-after

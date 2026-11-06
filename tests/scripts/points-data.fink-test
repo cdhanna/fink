@@ -95,3 +95,26 @@ assert point aim == 6,2 inherited
 frame 3
 stroke 10,2 right
 assert point aim == 2,2 inherited
+
+# the eraser has its own brush: a flipped pen erases with it
+set size 1
+set erasersize 5
+tool Pencil
+assert brushsize == 1
+stroke 1,8 14,8
+assert pixel Line 3,8 == 1
+pen eraser
+assert brushsize == 5
+stroke 3,8
+assert pixel Line 1,8 == 0
+assert pixel Line 5,8 == 0
+assert pixel Line 6,8 == 1
+pen tip
+assert brushsize == 1
+# [ and ] change the brush in use
+key RightBracket
+assert size == 2
+assert erasersize == 5
+tool Eraser
+key RightBracket
+assert erasersize == 6

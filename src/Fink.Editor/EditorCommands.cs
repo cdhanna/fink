@@ -39,6 +39,10 @@ public static class EditorCommands
             "Type part of a name to find an asset.", new[] { B("Ctrl+P") });
         Add("asset.duplicate", "Duplicate Asset", Assets, () => ed.DuplicateAsset(ed.Document));
         Add("asset.rename", "Rename Asset...", Assets, () => ui.ShowRenameAsset = true);
+        Add("asset.nineSlice", "9-Slice", Assets,
+            () => ed.SetSlice(ed.Document.Slice == null ? NineSlice.Thirds(ed.Document.Width, ed.Document.Height) : null),
+            "Lets the asset stretch like a panel: corners stay, edges and middle stretch. Drag the guides' tabs at the canvas edges.",
+            isChecked: () => ed.Document.Slice != null);
         Add("asset.delete", "Delete Asset...", Assets, () => ui.ShowDeleteAsset = true, enabled: () => ed.Project.Assets.Count > 1);
         Add("asset.next", "Next Asset", Assets, () => ed.StepAsset(+1), keys: new[] { B("Ctrl+PageDown") }, enabled: () => ed.Project.Assets.Count > 1);
         Add("asset.previous", "Previous Asset", Assets, () => ed.StepAsset(-1), keys: new[] { B("Ctrl+PageUp") }, enabled: () => ed.Project.Assets.Count > 1);
@@ -101,14 +105,14 @@ public static class EditorCommands
             "Eyedropper while held; the previous tool returns on release. Off for selection tools, where Alt subtracts.",
             new[] { B("Alt", Scope.Canvas) }, enabled: () => ed.Tool is not ISelectionTool,
             release: () => ed.EndMomentary(Momentary.Eyedropper));
-        Add("brush.size.decrease", "Brush Size Down", Tools, () => ed.ToolSettings.Size = Math.Max(1, ed.ToolSettings.Size - 1),
+        Add("brush.size.decrease", "Brush Size Down", Tools, () => ed.Brush.Size = Math.Max(1, ed.Brush.Size - 1),
             keys: new[] { B("LeftBracket") }, repeat: true);
-        Add("brush.size.increase", "Brush Size Up", Tools, () => ed.ToolSettings.Size = Math.Min(64, ed.ToolSettings.Size + 1),
+        Add("brush.size.increase", "Brush Size Up", Tools, () => ed.Brush.Size = Math.Min(64, ed.Brush.Size + 1),
             keys: new[] { B("RightBracket") }, repeat: true);
-        Add("brush.pixelPerfect", "Pixel Perfect", Tools, () => ed.ToolSettings.PixelPerfect = !ed.ToolSettings.PixelPerfect,
-            "Remove L-shaped corner pixels from 1px strokes.", isChecked: () => ed.ToolSettings.PixelPerfect);
-        Add("brush.squareTip", "Square Tip", Tools, () => ed.ToolSettings.SquareTip = !ed.ToolSettings.SquareTip,
-            isChecked: () => ed.ToolSettings.SquareTip);
+        Add("brush.pixelPerfect", "Pixel Perfect", Tools, () => ed.Brush.PixelPerfect = !ed.Brush.PixelPerfect,
+            "Remove L-shaped corner pixels from 1px strokes (for the brush in use: the eraser has its own).", isChecked: () => ed.Brush.PixelPerfect);
+        Add("brush.squareTip", "Square Tip", Tools, () => ed.Brush.SquareTip = !ed.Brush.SquareTip,
+            "Square instead of round (for the brush in use: the eraser has its own).", isChecked: () => ed.Brush.SquareTip);
         Add("fill.contiguous", "Contiguous Fill", Tools, () => ed.ToolSettings.FillContiguous = !ed.ToolSettings.FillContiguous,
             "Off: fill every matching pixel on the layer.", isChecked: () => ed.ToolSettings.FillContiguous);
         Add("layer.autoSelect", "Auto-select Layer", Tools, () => ed.AutoSelectLayer = !ed.AutoSelectLayer,
@@ -211,6 +215,13 @@ public static class EditorCommands
         Add("playback.toggle", "Play / Stop", Frames, ed.TogglePlay, keys: new[] { B("Enter") }, isChecked: () => ed.Playing);
         Add("playback.tag", "Play Tag Only", Frames, () => ed.PlayTag = !ed.PlayTag,
             "When the playhead is inside a tag, Play loops just that tag, in its loop mode.", isChecked: () => ed.PlayTag);
+        Add("onion.pin", "Pin Frame for Onion Skin", Frames, () => ed.Document.TogglePin(ed.FrameIndex),
+            "Pin this frame: its drawings show, tinted, from every other frame. Again to unpin.", new[] { B("Shift+O") },
+            isChecked: () => ed.Document.IsPinned(ed.FrameIndex));
+        Add("onion.pins", "Show Pinned Frames", Frames, () => ed.Onion.ShowPins = !ed.Onion.ShowPins,
+            isChecked: () => ed.Onion.ShowPins);
+        Add("onion.layer", "Onion Skin for This Layer", Frames, () => ed.CurrentLayer.OnionOff = !ed.CurrentLayer.OnionOff,
+            "Turn onion skin off (or back on) for the current layer only.", isChecked: () => !ed.CurrentLayer.OnionOff);
         Add("onion.toggle", "Onion Skin", Frames, () => ed.Onion.Enabled = !ed.Onion.Enabled,
             keys: new[] { B("O") }, isChecked: () => ed.Onion.Enabled);
 
@@ -219,6 +230,8 @@ public static class EditorCommands
         Add("layer.addLine", "New Line Layer", Layers, () => ed.AddLayer(LayerRole.Line), "Above the current layer.", new[] { B("Ctrl+Shift+L") });
         Add("layer.addFill", "New Fill Layer", Layers, () => ed.AddLayer(LayerRole.Fill), "Below the current layer.", new[] { B("Ctrl+Shift+F") });
         Add("layer.addReference", "New Reference Layer", Layers, () => ed.AddLayer(LayerRole.Reference), "At the bottom; never exported.");
+        Add("layer.rename", "Rename Layer...", Layers, () => ui.RenameLayer = true,
+            "Rename the current layer (or double-click its name). Names are unique in the asset.", new[] { B("F2") });
         Add("layer.delete", "Delete Layer", Layers, () => { ed.Settle(); DocumentOps.DeleteLayer(ed.Document, ed.History, ed.LayerIndex); ed.Clamp(); },
             enabled: () => ed.Document.Layers.Count > 1);
         Add("layer.selectAbove", "Select Layer Above", Layers, () => ed.LayerIndex++, keys: new[] { B("Ctrl+UpArrow") }, repeat: true);
@@ -237,6 +250,8 @@ public static class EditorCommands
         Add("view.pan.hold", "Pan (hold)", View, () => ed.BeginMomentary(Momentary.Pan),
             "Drag to pan while held.", new[] { B("Space", Scope.Canvas), B("MouseMiddle", Scope.Canvas) },
             release: () => ed.EndMomentary(Momentary.Pan));
+        Add("view.transport", "Transport Bar", View, () => ui.ShowTransport = !ui.ShowTransport,
+            "Big play, step and scrub controls under the canvas.", isChecked: () => ui.ShowTransport);
         Add("view.grid", "Pixel Grid", View, () => ed.View.ShowGrid = !ed.View.ShowGrid,
             "Shown at 800% zoom and above.", isChecked: () => ed.View.ShowGrid);
         Add("view.focus", "Focus Canvas", View, ui.ToggleFocus, "Hide every panel; press again to bring them back.",

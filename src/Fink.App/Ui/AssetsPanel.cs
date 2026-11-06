@@ -183,6 +183,7 @@ public sealed partial class FinkGame
         {
             Ed.SwitchAsset(a);
             MenuCommand("asset.rename");
+            MenuCommand("asset.nineSlice");
             MenuCommand("asset.duplicate");
             MenuCommand("asset.delete");
             ImGui.EndPopup();

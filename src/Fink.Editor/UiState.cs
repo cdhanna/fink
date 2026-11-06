@@ -19,6 +19,8 @@ public sealed class UiState
     public bool ShowNewAsset { get; set; }
     public bool ShowAssetPicker { get; set; }
     public bool ShowRenameAsset { get; set; }
+    /// <summary>Asks the layer lists to start renaming the current layer in place.</summary>
+    public bool RenameLayer { get; set; }
     public bool ShowDeleteAsset { get; set; }
     public bool ShowRecovery { get; set; }
 
@@ -43,6 +45,8 @@ public sealed class UiState
 
     /// <summary>Flipping the pen to its eraser end erases (Windows Ink pen messages).</summary>
     public bool PenEraser { get; set; } = true;
+    /// <summary>The play / step / scrub bar under the canvas.</summary>
+    public bool ShowTransport { get; set; } = true;
 
     /// <summary>Most recent first.</summary>
     public List<string> RecentFiles { get; set; } = new();
@@ -67,6 +71,8 @@ public sealed class UiState
     public string CurrentWorkspace { get; set; } = Workspaces.Draw;
 
     public float UiScale { get; set; } = 1f;
+    /// <summary>The theme in use, by name (built in, or a file in the themes folder).</summary>
+    public string ThemeName { get; set; } = Themes.Default;
     /// <summary>Set when <see cref="UiScale"/> changed and fonts must be rebuilt.</summary>
     public bool UiScaleDirty { get; set; }
 

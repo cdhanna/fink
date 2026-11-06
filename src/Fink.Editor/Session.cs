@@ -18,6 +18,8 @@ public sealed class SettingsPaths
     public string LayoutIni => Path.Combine(Root, "layout.ini");
     public string WorkspacesDir => Path.Combine(Root, "workspaces");
     public string ShaderPreview => Path.Combine(Root, "shader-preview.json");
+    /// <summary>Your own themes: one JSON file each.</summary>
+    public string ThemesDir => Path.Combine(Root, "themes");
     /// <summary>Autosaved unsaved work, for crash recovery.</summary>
     public string RecoveryDir => Path.Combine(Root, "recovery");
 }
@@ -41,6 +43,14 @@ public sealed class FinkSettings
     public List<string> RecentFiles { get; set; } = new();
     /// <summary>Flipping the pen to its eraser end switches to the Eraser while it's flipped.</summary>
     public bool PenEraser { get; set; } = true;
+    public bool ShowTransport { get; set; } = true;
+    public string Theme { get; set; } = Themes.Default;
+    public int BrushSize { get; set; } = 1;
+    public bool BrushSquare { get; set; }
+    public bool BrushPixelPerfect { get; set; } = true;
+    public int EraserSize { get; set; } = 3;
+    public bool EraserSquare { get; set; }
+    public bool EraserPixelPerfect { get; set; }
 }
 
 /// <summary>A saved workspace: ImGui's layout plus which panels are open.</summary>
@@ -105,6 +115,14 @@ public sealed class Session
                 Editor.ExportOptions.Padding = s.ExportPadding;
                 Ui.RecentFiles = s.RecentFiles.Where(File.Exists).ToList();
                 Ui.PenEraser = s.PenEraser;
+                Ui.ShowTransport = s.ShowTransport;
+                Ui.ThemeName = s.Theme;
+                Editor.ToolSettings.Size = Math.Clamp(s.BrushSize, 1, 64);
+                Editor.ToolSettings.SquareTip = s.BrushSquare;
+                Editor.ToolSettings.PixelPerfect = s.BrushPixelPerfect;
+                Editor.EraserSettings.Size = Math.Clamp(s.EraserSize, 1, 64);
+                Editor.EraserSettings.SquareTip = s.EraserSquare;
+                Editor.EraserSettings.PixelPerfect = s.EraserPixelPerfect;
             }
         }
         catch (Exception e) { problems.Add($"settings.json: {e.Message}"); }
@@ -136,6 +154,14 @@ public sealed class Session
             ExportPadding = Editor.ExportOptions.Padding,
             RecentFiles = Ui.RecentFiles,
             PenEraser = Ui.PenEraser,
+            ShowTransport = Ui.ShowTransport,
+            Theme = Ui.ThemeName,
+            BrushSize = Editor.ToolSettings.Size,
+            BrushSquare = Editor.ToolSettings.SquareTip,
+            BrushPixelPerfect = Editor.ToolSettings.PixelPerfect,
+            EraserSize = Editor.EraserSettings.Size,
+            EraserSquare = Editor.EraserSettings.SquareTip,
+            EraserPixelPerfect = Editor.EraserSettings.PixelPerfect,
         };
         File.WriteAllText(Paths.Settings, JsonSerializer.Serialize(s, JsonOptions));
         Keymap.Save(Paths.Keymap);

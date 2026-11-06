@@ -1,0 +1,38 @@
+# Renaming layers: unique names (ignoring case), trimmed, undoable; following and fills keep working.
+new 16 16
+wait 6
+cmd workspace.animate
+wait 6
+hover canvas
+assert layerorder == Line, Fill
+renamelayer Line Ink
+assert layerorder == Ink, Fill
+# names are unique, ignoring case, and can't be empty
+renamelayer Fill ink
+assert layerorder == Ink, Fill
+renamelayer Fill "   "
+assert layerorder == Ink, Fill
+renamelayer Fill "  Paint  "
+assert layerorder == Ink, Paint
+cmd edit.undo
+assert layerorder == Ink, Fill
+cmd edit.undo
+assert layerorder == Line, Fill
+cmd edit.redo
+assert layerorder == Ink, Fill
+
+# the fill still follows (and fills inside) the renamed line layer
+tool Pencil
+layer Ink
+color 1
+stroke 2,2 12,2 12,12 2,12 2,2
+layer Fill
+tool Fill
+color 9
+stroke 6,6
+assert pixel Fill 6,6 == 9
+
+# F2: the current layer's name turns into a text field (in the window)
+key F2
+wait 3
+shot rename-layer
